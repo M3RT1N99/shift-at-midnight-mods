@@ -118,7 +118,15 @@ namespace MidnightRadio
 
             _target.SuppressOriginal(true);
             source.maxDistance = _config.Playback.MaxRangeMeters;
-            source.volume = _target.SwitchedOn && !_muted ? _config.Playback.Volume : 0f;
+            // Governed by our own state, NOT by the game's switch.
+            //
+            // This used to read RadioTarget.SwitchedOn, which reflects the volume the game's
+            // Animator drives on the original source. That worked only while interacting
+            // with the radio still toggled it - once interaction was repurposed to open this
+            // panel, nothing could ever set it, so the Animator stayed in "music off" and
+            // every track played at zero volume. The radio is ours once adopted, so playing
+            // is what makes sound.
+            source.volume = _muted ? 0f : _config.Playback.Volume;
 
             if (source.isPlaying) _observedPlaying = true;
 

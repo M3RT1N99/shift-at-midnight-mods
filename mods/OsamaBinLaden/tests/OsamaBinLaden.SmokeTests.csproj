@@ -12,5 +12,6 @@
     <Compile Include="..\src\Config.cs" Link="Production\Config.cs" />
     <Compile Include="..\src\ExplosionMath.cs" Link="Production\ExplosionMath.cs" />
     <Compile Include="..\src\Log.cs" Link="Production\Log.cs" />
+    <Compile Include="..\src\Multiplayer\EncounterProtocol.cs" Link="Production\Multiplayer\EncounterProtocol.cs" />
   </ItemGroup>
 </Project>

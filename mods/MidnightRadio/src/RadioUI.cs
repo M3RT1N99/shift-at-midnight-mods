@@ -86,7 +86,29 @@ namespace MidnightRadio
         public void Draw()
         {
             if (!_open) return;
-            _window = GUI.Window(0x4D52, _window, _drawWindow, "Midnight Radio");
+
+            // Scaling the whole GUI matrix is what makes the panel grow with the screen.
+            // Sizing widgets alone leaves IMGUI's built-in font at its fixed pixel size, so
+            // at 4K the box grows while the text inside stays tiny. With the matrix, one
+            // factor scales layout and glyphs together.
+            //
+            // Everything inside therefore works in virtual coordinates: the usable area is
+            // the real resolution divided by the scale.
+            Matrix4x4 previous = GUI.matrix;
+            float scale = Ui.Scale;
+
+            try
+            {
+                GUI.matrix = Matrix4x4.TRS(
+                    Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1f));
+                _window = GUI.Window(0x4D52, _window, _drawWindow, "Midnight Radio");
+            }
+            finally
+            {
+                // Restored even on failure - leaving a scaled matrix behind would distort
+                // anything the game draws afterwards.
+                GUI.matrix = previous;
+            }
         }
 
         public void SetStatus(string status) => _status = status ?? string.Empty;
@@ -97,8 +119,11 @@ namespace MidnightRadio
         /// </summary>
         private void CentreIfNeeded()
         {
-            float screenWidth = Screen.width;
-            float screenHeight = Screen.height;
+            // Draw() scales the GUI matrix, so the window rect lives in virtual pixels:
+            // the usable area is the real resolution divided by that same factor.
+            float scale = Ui.Scale;
+            float screenWidth = Screen.width / scale;
+            float screenHeight = Screen.height / scale;
             if (screenWidth <= 0f || screenHeight <= 0f) return;
 
             bool offScreen = _window.x < 0f || _window.y < 0f ||

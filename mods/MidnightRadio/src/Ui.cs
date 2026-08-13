@@ -40,10 +40,14 @@ namespace MidnightRadio
             }
         }
 
-        /// <summary>Scales a value authored at 1080p to the current resolution.</summary>
-        public static float Px(float atReference) => atReference * Scale;
+        /// <summary>
+        /// Widths are NOT multiplied here. RadioUI.Draw scales the whole GUI matrix, so
+        /// everything inside already works in virtual pixels authored at 1080p - scaling
+        /// them again would apply the factor twice.
+        /// </summary>
+        public static float Px(float atReference) => atReference;
 
-        public static GUILayoutOption W(float atReference) => GUILayout.Width(Px(atReference));
+        public static GUILayoutOption W(float atReference) => GUILayout.Width(atReference);
 
         private static bool Available(string name) => !Unavailable.Contains(name);
 

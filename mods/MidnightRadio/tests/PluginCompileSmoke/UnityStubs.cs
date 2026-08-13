@@ -41,7 +41,21 @@ namespace UnityEngine
         public T GetComponent<T>() where T : class => null;
     }
 
-    public struct Vector3 { public static Vector3 zero => default; }
+    public struct Vector3
+    {
+        public Vector3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
+        public float x, y, z;
+        public static Vector3 zero => default;
+    }
+
+    public struct Quaternion { public static Quaternion identity => default; }
+
+    // Only the identity value and TRS are used; the panel scales uniformly.
+    public struct Matrix4x4
+    {
+        public static Matrix4x4 identity => default;
+        public static Matrix4x4 TRS(Vector3 position, Quaternion rotation, Vector3 scale) => default;
+    }
     public struct Vector2 { }
     public struct Rect
     {
@@ -146,6 +160,7 @@ namespace UnityEngine
 
         public static bool enabled { get; set; } = true;
         public static GUISkin skin { get; } = new();
+        public static Matrix4x4 matrix { get; set; }
         public static Rect Window(int id, Rect rect, WindowFunction draw, string title) { draw.Invoke(id); return rect; }
         public static void DragWindow(Rect rect) { }
     }
