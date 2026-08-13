@@ -40,9 +40,15 @@ stays silent instead of guessing at a substitute.
 
 ## sam-mod
 
-A dependency-free installer and updater — one self-contained `.exe` you can hand to someone
-who has nothing installed. SHA-256 comes from Windows CNG, HTTPS from WinHTTP, and the zip
-reader and DEFLATE decompressor are in-tree.
+A dependency-free installer and updater. SHA-256 comes from Windows CNG, HTTPS from
+WinHTTP, and the zip reader and DEFLATE decompressor are in-tree — so each build is a
+single self-contained `.exe` you can hand to someone who has nothing installed.
+
+Two front ends over the same code:
+
+- **`sam-mod-gui.exe`** — double-click it. Finds the game, lists what is installed, and
+  offers Update / Install from file / Remove / Verify. This is the one to give other players.
+- **`sam-mod.exe`** — the console tool, for scripting and CI.
 
 ```
 sam-mod list                    show installed mods

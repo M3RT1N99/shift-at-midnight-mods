@@ -22,12 +22,33 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
-$source = Join-Path $root 'src/main.cpp'
-if (-not (Test-Path -LiteralPath $source)) { throw "Missing $source." }
-
 if (-not $OutDir) { $OutDir = Join-Path $root 'build' }
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
-$output = Join-Path $OutDir 'sam-mod.exe'
+
+# Two front ends over the same headers: a console tool and a double-clickable window.
+# The GUI is what an end user gets handed, so it is not optional.
+$targets = @(
+    @{
+        Name    = 'sam-mod.exe'
+        Source  = Join-Path $root 'src/main.cpp'
+        Libs    = @('-lbcrypt', '-lwinhttp')
+        MsvcLibs = @('bcrypt.lib', 'winhttp.lib')
+        Console = $true
+    }
+    @{
+        Name    = 'sam-mod-gui.exe'
+        Source  = Join-Path $root 'src/gui.cpp'
+        Libs    = @('-luser32', '-lgdi32', '-lcomctl32', '-lole32', '-lshell32',
+                    '-lcomdlg32', '-lbcrypt', '-lwinhttp')
+        MsvcLibs = @('user32.lib', 'gdi32.lib', 'comctl32.lib', 'ole32.lib',
+                     'shell32.lib', 'comdlg32.lib', 'bcrypt.lib', 'winhttp.lib')
+        Console = $false
+    }
+)
+
+foreach ($t in $targets) {
+    if (-not (Test-Path -LiteralPath $t.Source)) { throw "Missing $($t.Source)." }
+}
 
 function Test-Tool { param([string]$Name) return [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
 
@@ -41,27 +62,37 @@ if (Test-Tool 'clang++') {
     if ($target -notmatch '^x86_64') { throw "clang++ targets '$target'; an x86_64 toolchain is required." }
 
     $optimisation = if ($Configuration -eq 'Release') { '-O2' } else { '-O0', '-g' }
-    $arguments = @('-std=c++20') + $optimisation + @(
-        '-Wall', '-Wextra', '-Wno-unused-parameter',
-        '-o', $output, $source, '-lbcrypt', '-lwinhttp'
-    )
 
-    & clang++ @arguments
-    if ($LASTEXITCODE -ne 0) { throw "clang++ failed with exit code $LASTEXITCODE." }
+    foreach ($t in $targets) {
+        $out = Join-Path $OutDir $t.Name
+        $arguments = @('-std=c++20') + $optimisation +
+            @('-Wall', '-Wextra', '-Wno-unused-parameter', '-o', $out, $t.Source) + $t.Libs
+
+        # A windowed subsystem keeps the GUI from flashing a console behind itself.
+        if (-not $t.Console) {
+            $arguments += @('-Wl,/SUBSYSTEM:WINDOWS', '-Wl,/ENTRY:wWinMainCRTStartup')
+        }
+
+        & clang++ @arguments
+        if ($LASTEXITCODE -ne 0) { throw "clang++ failed on $($t.Name) with exit code $LASTEXITCODE." }
+    }
 }
 elseif (Test-Tool 'cl') {
     Write-Host "==> MSVC ($Configuration)" -ForegroundColor Cyan
 
     $optimisation = if ($Configuration -eq 'Release') { '/O2' } else { '/Od', '/Zi' }
-    $arguments = @('/nologo', '/std:c++20', '/EHsc', '/W3') + $optimisation + @(
-        "/Fe:$output", $source,
-        '/link', 'bcrypt.lib', 'winhttp.lib'
-    )
 
     Push-Location $OutDir
     try {
-        & cl @arguments
-        if ($LASTEXITCODE -ne 0) { throw "cl failed with exit code $LASTEXITCODE." }
+        foreach ($t in $targets) {
+            $out = Join-Path $OutDir $t.Name
+            $arguments = @('/nologo', '/std:c++20', '/EHsc', '/W3') + $optimisation +
+                @("/Fe:$out", $t.Source, '/link') + $t.MsvcLibs
+            if (-not $t.Console) { $arguments += '/SUBSYSTEM:WINDOWS' }
+
+            & cl @arguments
+            if ($LASTEXITCODE -ne 0) { throw "cl failed on $($t.Name) with exit code $LASTEXITCODE." }
+        }
     }
     finally { Pop-Location }
 }
@@ -77,11 +108,14 @@ Run MSVC builds from a "Developer PowerShell for VS 2022" so the toolchain is on
 '@
 }
 
-$built = Get-Item -LiteralPath $output
-Write-Host "    $($built.FullName)" -ForegroundColor Green
-Write-Host "    $([math]::Round($built.Length / 1KB, 1)) KB" -ForegroundColor Green
+foreach ($t in $targets) {
+    $built = Get-Item -LiteralPath (Join-Path $OutDir $t.Name)
+    Write-Host "    $($built.Name)  $([math]::Round($built.Length / 1KB, 1)) KB" -ForegroundColor Green
+}
 
-# A build that cannot answer --help is not a build worth shipping.
-& $output --help | Out-Null
+# A console build that cannot answer --help is not worth shipping. The GUI has no such
+# check here: starting a window from a build script would need one closed again by hand.
+$cli = Join-Path $OutDir 'sam-mod.exe'
+& $cli --help | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'The built executable did not run.' }
 Write-Host '    smoke check passed' -ForegroundColor Green
