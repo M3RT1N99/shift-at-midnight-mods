@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "enabled": true,
+  "singlePlayerOnly": true,
+
+  "spawn": {
+    "enabled": true,
+    "maximumActive": 1,
+    "chancePerEligibleEncounter": 0.1
+  },
+
+  "attack": {
+    "triggerDistanceMeters": 12.0,
+    "runSpeedMetersPerSecond": 6.0,
+    "detonationDistanceMeters": 1.75,
+    "fuseSeconds": 0.35
+  },
+
+  "effects": {
+    "screamEnabled": true,
+    "screamVolume": 0.8,
+    "explosionRadiusMeters": 4.0,
+    "explosionDamage": 100.0,
+    "screenShake": true
+  },
+
+  "safety": {
+    "disableInMultiplayer": true,
+    "allowNetworkSends": false
+  },
+
+  "logging": {
+    "level": "info"
+  }
+}

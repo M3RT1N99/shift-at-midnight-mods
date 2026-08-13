@@ -3,7 +3,6 @@
   "hotkey": "F4",
   "language": "auto",
   "musicDirs": [],
-
   "playback": {
     "volume": 0.15,
     "volumeCeiling": 0.85,
@@ -13,29 +12,22 @@
     "duckWhileTransmittingDb": -12,
     "maxTrackMinutes": 10
   },
-
   "sync": {
     "enabled": false,
     "protocolVersion": 1,
-
     "acceptFromOthers": false,
     "anyoneCanQueue": false,
     "anyoneCanSkip": false,
     "requireVoteToSkip": false,
-
     "startLeadMs": 1500,
     "prefetchLeadSeconds": 20,
     "resyncIntervalSeconds": 15,
-
     "softCorrectAboveMs": 120,
     "softCorrectPitchRange": 0.02,
     "hardSeekAboveMs": 750,
-
     "onMissingTrack": "silent",
     "onHuntMusic": "duck",
-
     "blockedPlayers": [],
-
     "peerToPeerTransfer": {
       "enabled": false,
       "consentAcceptedVersion": 0,
@@ -45,7 +37,6 @@
       "onlyOutsideHunt": true
     }
   },
-
   "urlMode": {
     "enabled": false,
     "noticeAcceptedVersion": 0,
@@ -56,17 +47,16 @@
     "maxDurationMinutes": 15,
     "resolveTimeoutSeconds": 120
   },
-
   "tools": {
     "ytDlpPath": null,
-    "ffmpegPath": null
+    "ffmpegPath": null,
+    "autoUpdate": true,
+    "ffmpegRefreshDays": 30
   },
-
   "cache": {
     "maxCacheMB": 2048,
     "evictionEnabled": true
   },
-
   "logging": {
     "level": "info",
     "keepDays": 7,

@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>OsamaBinLaden</AssemblyName>
+    <RootNamespace>OsamaBinLaden</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Marti</Authors>
+    <Product>Osama Bin Laden NPC</Product>
+
+    <EnableDynamicLoading>false</EnableDynamicLoading>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType Condition="'$(Configuration)' == 'Debug'">portable</DebugType>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+
+    <NoWarn>$(NoWarn);CS0436;CS0618;NU1701</NoWarn>
+    <AssemblySearchPaths>$(AssemblySearchPaths);{RawFileName}</AssemblySearchPaths>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <MelonLoaderDir>$(GameDir)\MelonLoader</MelonLoaderDir>
+    <MelonLoaderNet6>$(MelonLoaderDir)\net6</MelonLoaderNet6>
+    <InteropDir>$(MelonLoaderDir)\Il2CppAssemblies</InteropDir>
+  </PropertyGroup>
+
+  <Target Name="VerifyGameDir" BeforeTargets="BeforeResolveReferences">
+    <Error Condition="'$(GameDir)' == ''"
+           Text="GameDir is not set. Build through scripts\build.ps1 or pass -p:GameDir=&quot;D:\path\to\Shift At Midnight&quot;." />
+    <Error Condition="!Exists('$(MelonLoaderNet6)\MelonLoader.dll')"
+           Text="MelonLoader not found at $(MelonLoaderNet6). Install MelonLoader x64 0.7.3+ first." />
+    <Error Condition="!Exists('$(InteropDir)\Il2Cppmscorlib.dll')"
+           Text="IL2CPP assemblies not found at $(InteropDir). Launch the game once with MelonLoader first." />
+    <Error Condition="!Exists('$(InteropDir)\Assembly-CSharp.dll')"
+           Text="Assembly-CSharp.dll is missing from $(InteropDir). Regenerate MelonLoader interop assemblies." />
+    <Error Condition="!Exists('$(InteropDir)\Il2CppFusion.Runtime.dll')"
+           Text="Il2CppFusion.Runtime.dll is missing from $(InteropDir). Re-verify the supported game build." />
+  </Target>
+
+  <ItemGroup>
+    <Reference Include="MelonLoader" HintPath="$(MelonLoaderNet6)\MelonLoader.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(MelonLoaderNet6)\0Harmony.dll" Private="false" />
+    <Reference Include="Il2CppInterop.Runtime" HintPath="$(MelonLoaderNet6)\Il2CppInterop.Runtime.dll" Private="false" />
+    <Reference Include="Il2CppInterop.Common" HintPath="$(MelonLoaderNet6)\Il2CppInterop.Common.dll" Private="false" />
+
+    <Reference Include="Il2Cppmscorlib" HintPath="$(InteropDir)\Il2Cppmscorlib.dll" Private="false">
+      <Aliases>il2cpp</Aliases>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule" HintPath="$(InteropDir)\UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AudioModule" HintPath="$(InteropDir)\UnityEngine.AudioModule.dll" Private="false" />
+    <Reference Include="UnityEngine.PhysicsModule" HintPath="$(InteropDir)\UnityEngine.PhysicsModule.dll" Private="false" />
+    <Reference Include="UnityEngine.ParticleSystemModule" HintPath="$(InteropDir)\UnityEngine.ParticleSystemModule.dll" Private="false" />
+    <Reference Include="UnityEngine.AIModule" HintPath="$(InteropDir)\UnityEngine.AIModule.dll" Private="false" />
+    <Reference Include="Assembly-CSharp" HintPath="$(InteropDir)\Assembly-CSharp.dll" Private="false" />
+    <Reference Include="Il2CppFusion.Runtime" HintPath="$(InteropDir)\Il2CppFusion.Runtime.dll" Private="false" />
+
+    <Reference Include="Il2CppAstarPathfindingProject"
+               HintPath="$(InteropDir)\Il2CppAstarPathfindingProject.dll"
+               Private="false"
+               Condition="Exists('$(InteropDir)\Il2CppAstarPathfindingProject.dll')" />
+  </ItemGroup>
+
+</Project>

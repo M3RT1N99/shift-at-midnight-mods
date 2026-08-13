@@ -124,6 +124,135 @@ namespace MidnightRadio
             }).ConfigureAwait(false);
         }
 
+        /// <summary>
+        /// Keeps the tools current. Called on start; never blocks the game and never
+        /// reports a problem to the player, because being offline is not an error here.
+        ///
+        /// yt-dlp is checked every start: it breaks within weeks as sites change, and the
+        /// check is one small API call. ffmpeg is refreshed on an interval instead - its
+        /// build has no cheap version endpoint and re-fetching is ~80 MB.
+        /// </summary>
+        public async Task UpdateAsync(
+            Config.ToolsCfg settings, IProgress<string> status, CancellationToken cancellationToken)
+        {
+            if (settings != null && !settings.AutoUpdate) return;
+
+            try
+            {
+                if (HasYtDlp) await UpdateYtDlpAsync(status, cancellationToken).ConfigureAwait(false);
+
+                int refreshDays = Math.Max(1, settings?.FfmpegRefreshDays ?? 30);
+                if (HasFfmpeg && OlderThan(FfmpegPath, TimeSpan.FromDays(refreshDays)))
+                {
+                    Log.Info($"ffmpeg is older than {refreshDays} days, refreshing");
+                    TryDelete(FfmpegPath);
+                    TryDelete(FfprobePath);
+                    await EnsureFfmpegAsync(status, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                Log.Debug("tool update check failed: " + ex.Message);
+            }
+        }
+
+        private async Task UpdateYtDlpAsync(IProgress<string> status, CancellationToken cancellationToken)
+        {
+            string installed = await ReadYtDlpVersionAsync(cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(installed)) return;
+
+            string latest = await ReadLatestYtDlpTagAsync(cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrEmpty(latest)) return;   // offline, rate-limited: keep what we have
+
+            if (string.Equals(installed, latest, StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Debug($"yt-dlp {installed} is current");
+                return;
+            }
+
+            Log.Info($"updating yt-dlp {installed} -> {latest}");
+            status?.Report($"Aktualisiere yt-dlp auf {latest} …");
+
+            // Downloaded to .part and renamed on success, so a failed update leaves the
+            // working copy in place rather than a broken one.
+            if (await DownloadToFileAsync(YtDlpUrl, YtDlpPath, status, cancellationToken)
+                    .ConfigureAwait(false))
+                status?.Report($"yt-dlp {latest} installiert.");
+        }
+
+        private async Task<string> ReadYtDlpVersionAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                var start = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = YtDlpPath,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                start.ArgumentList.Add("--version");
+
+                using var process = System.Diagnostics.Process.Start(start);
+                if (process == null) return null;
+
+                Task<string> output = process.StandardOutput.ReadToEndAsync();
+
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(20));
+                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+
+                return (await output.ConfigureAwait(false) ?? string.Empty).Trim();
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("could not read the yt-dlp version: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static async Task<string> ReadLatestYtDlpTagAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("MidnightRadio/1.0");
+
+                string json = await client
+                    .GetStringAsync("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest",
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                // One field is wanted from a large document; a substring read avoids
+                // deserialising the whole release payload.
+                const string key = "\"tag_name\":";
+                int at = json.IndexOf(key, StringComparison.Ordinal);
+                if (at < 0) return null;
+
+                int open = json.IndexOf('"', at + key.Length);
+                int close = open < 0 ? -1 : json.IndexOf('"', open + 1);
+                return open < 0 || close < 0 ? null : json.Substring(open + 1, close - open - 1);
+            }
+            catch (Exception ex)
+            {
+                Log.Debug("could not read the latest yt-dlp tag: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static bool OlderThan(string path, TimeSpan age)
+        {
+            try { return DateTime.UtcNow - File.GetLastWriteTimeUtc(path) > age; }
+            catch { return false; }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
         /// <summary>One download at a time, so two tracks queued at once cannot race.</summary>
         private async Task<string> Serialise(Func<Task<string>> work)
         {
@@ -180,7 +309,7 @@ namespace MidnightRadio
                             .ConfigureAwait(false);
                         written += read;
 
-                        if (total is > 0)
+                        if (total.HasValue && total.Value > 0)
                         {
                             int percent = (int)(written * 100 / total.Value);
                             if (percent != lastReported && percent % 5 == 0)

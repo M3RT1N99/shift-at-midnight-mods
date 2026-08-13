@@ -1,0 +1,6 @@
+No third-party code, game assets, character art, audio, media, models,
+textures, scenes, asset bundles or external executables are redistributed
+with this mod.
+
+MelonLoader and Shift At Midnight are runtime requirements and are not part
+of the package.

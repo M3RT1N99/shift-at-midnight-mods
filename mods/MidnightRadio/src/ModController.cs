@@ -97,6 +97,17 @@ namespace MidnightRadio
                 SaveConfig);
 
             ReloadLibrary();
+
+            // Deliberately fire-and-forget on a worker thread. Keeping the tools current
+            // matters - yt-dlp stops working within weeks as sites change - but it is never
+            // worth delaying the game for, and being offline is not an error.
+            // Called directly rather than through Task.Run: UpdateAsync is already async
+            // throughout, and Task.Run's Func<Task> overload carries nullable annotations
+            // that the Il2Cpp interop mscorlib cannot satisfy (CS0656 NullableAttribute).
+            _ = _provisioner.UpdateAsync(
+                _config.Tools,
+                new Progress<string>(message => Post(() => _ui.SetStatus(message))),
+                _shutdown.Token);
         }
 
         public void Update()

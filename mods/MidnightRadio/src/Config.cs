@@ -103,6 +103,15 @@ namespace MidnightRadio
         {
             public string YtDlpPath { get; set; }
             public string FfmpegPath { get; set; }
+
+            /// <summary>Check for newer tools on start. yt-dlp breaks quickly when stale.</summary>
+            public bool AutoUpdate { get; set; } = true;
+
+            /// <summary>
+            /// ffmpeg has no cheap version endpoint and its build is ~80 MB, so it is
+            /// re-fetched on an interval rather than checked every start.
+            /// </summary>
+            public int FfmpegRefreshDays { get; set; } = 30;
         }
 
         internal sealed class CacheCfg
