@@ -266,12 +266,84 @@ public:
             }
             std::error_code ignored;
             fs::remove(target, ignored);
+
+            // A disabled mod has its assemblies renamed, so the recorded name is gone and
+            // removing only that would leave the parked file behind.
+            fs::remove(fs::path(target.string() + kDisabledSuffix), ignored);
+
             pruneEmptyParents(target.parent_path());
         }
 
         std::error_code ignored;
         fs::remove_all(vault, ignored);
         fs::remove(stateDir_ / "installed" / (slug + ".json"), ignored);
+    }
+
+    /// Suffix appended to a plugin assembly so the loader stops seeing it.
+    static constexpr const char* kDisabledSuffix = ".disabled";
+
+    /// <summary>
+    /// A mod is disabled by renaming its assemblies rather than deleting anything.
+    /// MelonLoader only loads *.dll, so the suffix is enough to keep the mod installed,
+    /// configured and indexed while it stays out of the game. Re-enabling is the same
+    /// rename in reverse - no reinstall, no lost settings.
+    /// </summary>
+    bool isEnabled(const std::string& slug) const {
+        const fs::path modDir = gameDir_ / "Mods" / slug;
+        if (!fs::exists(modDir)) return true;   // nothing of ours to disable
+
+        bool sawDisabled = false;
+        for (const auto& entry : fs::recursive_directory_iterator(modDir)) {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() == ".dll") return true;
+            if (entry.path().string().size() > 9 &&
+                entry.path().extension() == kDisabledSuffix)
+                sawDisabled = true;
+        }
+        return !sawDisabled;
+    }
+
+    /// <summary>Enables or disables a mod. Returns how many files were renamed.</summary>
+    int setEnabled(const std::string& slug, bool enabled) {
+        if (!receiptFor(slug)) throw InstallError(slug + " is not installed");
+
+        const fs::path modDir = gameDir_ / "Mods" / slug;
+        if (!fs::exists(modDir)) throw InstallError("no files found for " + slug);
+
+        if (findReparsePoint(gameDir_, modDir))
+            throw InstallError("refusing to touch '" + modDir.string() +
+                               "': that path is a link into the real game installation");
+
+        std::vector<std::pair<fs::path, fs::path>> renames;
+        for (const auto& entry : fs::recursive_directory_iterator(modDir)) {
+            if (!entry.is_regular_file()) continue;
+            const fs::path& from = entry.path();
+
+            if (enabled) {
+                if (from.extension() != kDisabledSuffix) continue;
+                renames.emplace_back(from, fs::path(from).replace_extension());
+            } else {
+                if (from.extension() != ".dll") continue;
+                renames.emplace_back(from, from.string() + kDisabledSuffix);
+            }
+        }
+
+        // Applied as a unit: a half-renamed mod would load some assemblies and not
+        // others, which is worse than either state.
+        std::vector<std::pair<fs::path, fs::path>> done;
+        try {
+            for (const auto& [from, to] : renames) {
+                fs::rename(from, to);
+                done.emplace_back(from, to);
+            }
+        } catch (const std::exception& ex) {
+            std::error_code ignored;
+            for (auto it = done.rbegin(); it != done.rend(); ++it)
+                fs::rename(it->second, it->first, ignored);
+            throw InstallError(std::string("could not change state: ") + ex.what());
+        }
+
+        return static_cast<int>(renames.size());
     }
 
     struct VerifyResult {
@@ -285,8 +357,16 @@ public:
 
         VerifyResult result;
         for (const auto& file : receipt->files) {
-            const fs::path target = gameDir_ / fs::path(file.relativePath);
-            if (!fs::exists(target)) { result.missing.push_back(file.relativePath); continue; }
+            fs::path target = gameDir_ / fs::path(file.relativePath);
+
+            // A disabled mod has its assemblies renamed, so the recorded path is gone by
+            // design. Check the renamed file instead of reporting it missing.
+            if (!fs::exists(target)) {
+                const fs::path parked = target.string() + kDisabledSuffix;
+                if (fs::exists(parked)) target = parked;
+                else { result.missing.push_back(file.relativePath); continue; }
+            }
+
             if (Sha256::ofFile(target) != file.sha256)
                 result.modified.push_back(file.relativePath);
         }

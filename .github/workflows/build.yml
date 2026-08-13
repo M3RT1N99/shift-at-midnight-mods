@@ -1,0 +1,139 @@
+name: Build
+
+# Every push and pull request. The point is that a commit which cannot build never
+# reaches master unnoticed.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed only by the release job
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # What CI can and cannot do for the plugins.
+  #
+  # The mod DLLs cannot be built here. MidnightRadio.csproj references the IL2CPP
+  # interop assemblies that MelonLoader generates from the installed game, and
+  # those are derived from copyrighted game files - they are not in the repository
+  # and must not be.
+  #
+  # What CI can do is compile every source file against the Unity/loader stubs in
+  # tests/PluginCompileSmoke and run the smoke suite. That catches the ordinary
+  # breakage: syntax, references, signatures and logic.
+  #
+  # It does NOT catch IL2CPP-only failures. Two real examples from this project:
+  # property patterns and Task.Run's Func<Task> overload both compile fine against
+  # the stubs and fail against the interop assemblies with CS0656. The real build
+  # therefore stays a local step before release.
+  # ---------------------------------------------------------------------------
+  plugins:
+    name: Plugins (stub build + tests)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Discover mods
+        id: mods
+        shell: pwsh
+        run: |
+          $mods = Get-ChildItem -Path mods -Directory |
+                  Where-Object { Test-Path (Join-Path $_.FullName 'tests') }
+          "list=$($mods.Name -join ',')" >> $env:GITHUB_OUTPUT
+          Write-Host "Found: $($mods.Name -join ', ')"
+
+      - name: Compile every mod against the stubs
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($project in Get-ChildItem -Path mods -Recurse -Filter 'PluginCompileSmoke.csproj') {
+            Write-Host "::group::$($project.FullName)"
+            dotnet build $project.FullName -c Release --nologo
+            if ($LASTEXITCODE -ne 0) { $failed += $project.FullName }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count -gt 0) { throw "Stub build failed:`n  $($failed -join "`n  ")" }
+
+      - name: Run the smoke suites
+        shell: pwsh
+        run: |
+          $failed = @()
+          foreach ($project in Get-ChildItem -Path mods -Recurse -Filter '*.SmokeTests.csproj') {
+            Write-Host "::group::$($project.FullName)"
+            dotnet run --project $project.FullName -c Release --nologo
+            if ($LASTEXITCODE -ne 0) { $failed += $project.FullName }
+            Write-Host "::endgroup::"
+          }
+          if ($failed.Count -gt 0) { throw "Smoke tests failed:`n  $($failed -join "`n  ")" }
+
+  # ---------------------------------------------------------------------------
+  # The installer has no such limitation: it links only against Windows libraries,
+  # so CI builds exactly what ships.
+  # ---------------------------------------------------------------------------
+  installer:
+    name: Installer (sam-mod)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build
+        shell: pwsh
+        run: .\tools\sam-mod\build.ps1 -Configuration Release
+
+      - name: Check the binaries run
+        shell: pwsh
+        run: |
+          $cli = '.\tools\sam-mod\build\sam-mod.exe'
+          & $cli --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'sam-mod.exe did not run.' }
+
+          # The GUI is windowed, so it is started and closed rather than asked for help.
+          $gui = Start-Process '.\tools\sam-mod\build\sam-mod-gui.exe' -PassThru
+          Start-Sleep -Seconds 5
+          if ($gui.HasExited) { throw "sam-mod-gui.exe exited immediately (code $($gui.ExitCode))." }
+          Stop-Process -Id $gui.Id -Force
+          Write-Host 'both binaries start'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sam-mod
+          path: |
+            tools/sam-mod/build/sam-mod.exe
+            tools/sam-mod/build/sam-mod-gui.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Packaging needs the built plugin DLL, which CI cannot produce, so packages are
+  # still built locally. This job only attaches the installer to a tagged release,
+  # so the .modpkg uploaded by hand and the installer always come from the same commit.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Attach installer to release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [plugins, installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sam-mod
+          path: dist
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/sam-mod.exe dist/sam-mod-gui.exe \
+            --clobber --repo "${GITHUB_REPOSITORY}"

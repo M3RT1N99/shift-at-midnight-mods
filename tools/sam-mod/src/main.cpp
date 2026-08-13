@@ -43,6 +43,8 @@ void printUsage() {
         "  list                    show installed mods\n"
         "  install <file.modpkg>   install from a local package\n"
         "  update                  fetch and install the newest release from GitHub\n"
+        "  disable <slug>          keep a mod installed but stop the game loading it\n"
+        "  enable <slug>           load it again\n"
         "  uninstall <slug>        remove a mod and restore the originals\n"
         "  verify [slug]           check installed files against their recorded hashes\n"
         "  where                   show the detected game directory\n\n"
@@ -108,9 +110,25 @@ int cmdList(Installer& installer) {
         return 0;
     }
     std::cout << "Installed in " << installer.gameDir().string() << ":\n\n";
-    for (const auto& mod : mods)
-        std::cout << "  " << mod.name << "  " << mod.version
+    for (const auto& mod : mods) {
+        const bool enabled = installer.isEnabled(mod.slug);
+        std::cout << "  " << (enabled ? "[on ] " : "[off] ")
+                  << mod.name << "  " << mod.version
                   << "  (" << mod.slug << ", " << mod.files.size() << " files)\n";
+    }
+    return 0;
+}
+
+int cmdSetEnabled(Installer& installer, const std::string& slug, bool enable) {
+    const int changed = installer.setEnabled(slug, enable);
+    if (changed == 0) {
+        std::cout << slug << " is already " << (enable ? "enabled" : "disabled") << "\n";
+        return 0;
+    }
+    std::cout << (enable ? "Enabled " : "Disabled ") << slug
+              << " (" << changed << " file" << (changed == 1 ? "" : "s") << ")\n";
+    if (!enable)
+        std::cout << "Its settings and music are untouched; enable it again at any time.\n";
     return 0;
 }
 
@@ -268,6 +286,13 @@ int main(int argc, char** argv) {
         if (command == "uninstall") {
             if (positional.empty()) { std::cerr << "error: uninstall needs a mod slug\n"; return 1; }
             return cmdUninstall(installer, positional, options);
+        }
+        if (command == "disable" || command == "enable") {
+            if (positional.empty()) {
+                std::cerr << "error: " << command << " needs a mod slug\n";
+                return 1;
+            }
+            return cmdSetEnabled(installer, positional, command == "enable");
         }
 
         std::cerr << "error: unknown command '" << command << "'\n\n";

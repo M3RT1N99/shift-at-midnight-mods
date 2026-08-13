@@ -47,7 +47,8 @@ constexpr const char* kOwner = "M3RT1N99";
 constexpr const char* kRepo = "shift-at-midnight-mods";
 
 enum : int {
-    IdPath = 1001, IdBrowse, IdUpdatePlay, IdUpdateOnly, IdPlayOnly, IdLog, IdStatus, IdVersions
+    IdPath = 1001, IdBrowse, IdUpdatePlay, IdUpdateOnly, IdPlayOnly, IdLog, IdStatus, IdVersions,
+    IdMods, IdToggle, IdUninstall
 };
 enum : UINT {
     WmLog = WM_APP + 1,      // lParam = new std::wstring*
@@ -67,9 +68,12 @@ std::wstring widen(const std::string& s) {
 struct App {
     HWND window{}, pathBox{}, browse{}, status{}, versions{}, log{};
     HWND updatePlay{}, updateOnly{}, playOnly{};
+    HWND mods{}, toggle{}, uninstall{};
     HFONT font{}, bigFont{}, monoFont{};
 
     fs::path gameDir;
+    std::vector<Receipt> installed;
+    std::vector<bool> enabled;
     std::atomic<bool> busy{false};
     bool playAfterUpdate = false;
 };
@@ -160,6 +164,49 @@ void RefreshValidity() {
 
     g.gameDir = ok ? fs::path(dir) : fs::path{};
     EnableWindow(g.playOnly, ok && !g.busy);
+}
+
+/// Fills the mod list and updates the toggle label to match the selection.
+void RefreshMods() {
+    SendMessageW(g.mods, LB_RESETCONTENT, 0, 0);
+    g.installed.clear();
+    g.enabled.clear();
+
+    if (g.gameDir.empty()) return;
+
+    try {
+        Installer installer(g.gameDir);
+        g.installed = installer.installed();
+        for (const auto& mod : g.installed) {
+            const bool on = installer.isEnabled(mod.slug);
+            g.enabled.push_back(on);
+
+            const std::wstring line = (on ? L"[an]   " : L"[aus] ") +
+                                      widen(mod.name) + L"   " + widen(mod.version);
+            SendMessageW(g.mods, LB_ADDSTRING, 0, (LPARAM)line.c_str());
+        }
+    } catch (...) { /* an unreadable install simply shows an empty list */ }
+
+    if (g.installed.empty())
+        SendMessageW(g.mods, LB_ADDSTRING, 0, (LPARAM)L"(keine Mods installiert)");
+    else
+        SendMessageW(g.mods, LB_SETCURSEL, 0, 0);
+}
+
+/// Index into g.installed, or -1 when the placeholder row is selected.
+int SelectedMod() {
+    if (g.installed.empty()) return -1;
+    const LRESULT index = SendMessageW(g.mods, LB_GETCURSEL, 0, 0);
+    if (index == LB_ERR || index < 0 || (size_t)index >= g.installed.size()) return -1;
+    return (int)index;
+}
+
+void RefreshToggleLabel() {
+    const int index = SelectedMod();
+    const bool on = index >= 0 && g.enabled[(size_t)index];
+    SetWindowTextW(g.toggle, on ? L"Deaktivieren" : L"Aktivieren");
+    EnableWindow(g.toggle, index >= 0 && !g.busy);
+    EnableWindow(g.uninstall, index >= 0 && !g.busy);
 }
 
 void ShowVersions(const std::wstring& latest) {
@@ -307,9 +354,18 @@ void BuildUi(HWND parent) {
     g.playOnly = Make(parent, L"BUTTON", L"Spiel starten", BS_PUSHBUTTON,
                       528, 92, 160, 48, IdPlayOnly, g.font);
 
+    Make(parent, L"STATIC", L"Installierte Mods", 0, 12, 152, 200, 18, 0, g.font);
+    g.mods = Make(parent, L"LISTBOX", nullptr, WS_BORDER | WS_VSCROLL | LBS_NOTIFY,
+                  12, 172, 500, 96, IdMods, g.font);
+
+    g.toggle = Make(parent, L"BUTTON", L"Deaktivieren", BS_PUSHBUTTON,
+                    522, 172, 166, 30, IdToggle, g.font);
+    g.uninstall = Make(parent, L"BUTTON", L"Deinstallieren", BS_PUSHBUTTON,
+                       522, 206, 166, 30, IdUninstall, g.font);
+
     g.log = Make(parent, L"EDIT", L"",
                  WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-                 12, 152, 676, 328, IdLog, g.monoFont);
+                 12, 280, 676, 200, IdLog, g.monoFont);
 }
 
 void AppendLog(const std::wstring& line) {
@@ -362,6 +418,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
             g.busy = false;
             for (HWND h : {g.updatePlay, g.updateOnly, g.browse}) EnableWindow(h, TRUE);
             RefreshValidity();
+            RefreshMods();
+            RefreshToggleLabel();
             return 0;
 
         case WM_COMMAND: {
@@ -422,6 +480,52 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
                 case IdPlayOnly:
                     LaunchGame();
                     return 0;
+
+                case IdMods:
+                    if (HIWORD(wParam) == LBN_SELCHANGE) RefreshToggleLabel();
+                    return 0;
+
+                case IdToggle: {
+                    const int index = SelectedMod();
+                    if (index < 0) return 0;
+
+                    const Receipt mod = g.installed[(size_t)index];
+                    const bool turnOn = !g.enabled[(size_t)index];
+                    const fs::path dir = g.gameDir;
+
+                    RunAsync([dir, mod, turnOn] {
+                        Installer installer(dir);
+                        int changed = installer.setEnabled(mod.slug, turnOn);
+                        Log(mod.name + (turnOn ? " aktiviert" : " deaktiviert") +
+                            " (" + std::to_string(changed) + " Datei(en)).");
+                        if (!turnOn)
+                            Log(std::wstring(L"Einstellungen und Musik bleiben erhalten."));
+                    });
+                    return 0;
+                }
+
+                case IdUninstall: {
+                    const int index = SelectedMod();
+                    if (index < 0) return 0;
+
+                    const Receipt mod = g.installed[(size_t)index];
+                    const std::wstring question =
+                        L"„" + widen(mod.name) + L"“ vollständig entfernen?\r\n\r\n"
+                        L"Die Originaldateien des Spiels werden wiederhergestellt. "
+                        L"Deine Musik und Einstellungen bleiben erhalten.\r\n\r\n"
+                        L"Zum vorübergehenden Abschalten reicht „Deaktivieren“.";
+                    if (MessageBoxW(window, question.c_str(), kTitle,
+                                    MB_YESNO | MB_ICONQUESTION) != IDYES)
+                        return 0;
+
+                    const fs::path dir = g.gameDir;
+                    RunAsync([dir, mod] {
+                        Installer installer(dir);
+                        installer.uninstall(mod.slug);
+                        Log(mod.name + " entfernt.");
+                    });
+                    return 0;
+                }
             }
             return 0;
         }
@@ -462,7 +566,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
 
     // Centred on the monitor that currently holds the cursor, so it opens where the user
     // is looking rather than wherever Windows would have stacked it.
-    constexpr int kWidth = 716, kHeight = 530;
+    constexpr int kWidth = 716, kHeight = 560;
     int left = CW_USEDEFAULT, top = CW_USEDEFAULT;
     {
         POINT cursor{};
@@ -493,6 +597,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     if (!IsValidGameDir(startPath)) startPath = DetectGameDir().wstring();
     SetWindowTextW(g.pathBox, startPath.c_str());
     RefreshValidity();
+
+    RefreshMods();
+    RefreshToggleLabel();
 
     AppendLog(std::wstring(L"Repository: ") + widen(std::string(kOwner) + "/" + kRepo));
     if (g.gameDir.empty())
