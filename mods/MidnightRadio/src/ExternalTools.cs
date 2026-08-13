@@ -852,8 +852,14 @@ namespace MidnightRadio
                 "--audio-quality", audioQuality.ToString(CultureInfo.InvariantCulture),
                 "--ffmpeg-location", ffmpegPath,
                 "--paths", cacheDirectory,
-                "--output", "%(extractor_key).32s-%(id).96s.%(ext)s",
-                "--restrict-filenames",
+                // The library takes a track's display name from its file name, so the title
+                // has to lead. The previous template was extractor + id, which showed up in
+                // the playlist as "Youtube-5zvn60-E1HA" and told the player nothing.
+                // The id is kept in brackets so two videos sharing a title stay distinct.
+                "--output", "%(title).100s [%(id).32s].%(ext)s",
+                // --restrict-filenames is deliberately NOT used: it strips non-ASCII and
+                // turns spaces into underscores, which mangles exactly the titles this is
+                // meant to surface. --windows-filenames sanitises only what Windows forbids.
                 "--windows-filenames",
                 "--trim-filenames", "160",
                 "--match-filters", $"!is_live & duration <= {maxDurationMinutes * 60}",
