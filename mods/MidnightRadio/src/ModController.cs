@@ -20,6 +20,7 @@ namespace MidnightRadio
         private readonly PlaybackController _player;
         private readonly YtDlpBridge _ytDlp;
         private readonly AudioTranscoder _transcoder;
+        private readonly ToolProvisioner _provisioner;
         private readonly RadioUI _ui;
         private readonly CancellationTokenSource _shutdown = new();
 
@@ -57,8 +58,9 @@ namespace MidnightRadio
             _player = new PlaybackController(_config);
             _player.TrackEnded += AutoNext;
             _ytDlp = new YtDlpBridge(_config, _dataDirectory);
+            _provisioner = new ToolProvisioner(_dataDirectory);
             _transcoder = new AudioTranscoder(
-                new ToolLocator(_config, _dataDirectory), _dataDirectory);
+                new ToolLocator(_config, _dataDirectory), _provisioner, _dataDirectory);
 
             // Synced playback rides on the game's own Fusion connection. With no session,
             // no receive path or no other modded peer, every one of these calls degrades to
@@ -348,13 +350,50 @@ namespace MidnightRadio
             }
 
             _downloadRunning = true;
-            _ui.SetStatus("yt-dlp wird gestartet …");
+            _ui.SetStatus("Prüfe Werkzeuge …");
             var progress = new Progress<DownloadProgress>(p => Post(() =>
             {
                 if (p.Percent.HasValue)
                     _ui.SetStatus($"Download {p.Percent.Value:0}% …");
             }));
 
+            // yt-dlp and ffmpeg are fetched on demand rather than shipped, so the first URL
+            // a player pastes also installs what it needs. Both land in Tools/, which
+            // ToolLocator already searches, so the bridge below finds them unchanged.
+            var toolStatus = new Progress<string>(message => Post(() => _ui.SetStatus(message)));
+
+            EnsureUrlToolsAsync(toolStatus)
+                .ContinueWith((Task<bool> ready) =>
+                {
+                    if (!ready.IsCompletedSuccessfully || !ready.Result)
+                    {
+                        Post(() =>
+                        {
+                            _downloadRunning = false;
+                            _ui.SetStatus("yt-dlp konnte nicht bereitgestellt werden. "
+                                          + "Prüfe die Internetverbindung.");
+                        });
+                        return;
+                    }
+
+                    Post(() => _ui.SetStatus("yt-dlp wird gestartet …"));
+                    StartDownload(url, progress);
+                });
+        }
+
+        private async Task<bool> EnsureUrlToolsAsync(IProgress<string> status)
+        {
+            string ytDlp = await _provisioner.EnsureYtDlpAsync(status, _shutdown.Token)
+                .ConfigureAwait(false);
+            if (string.IsNullOrEmpty(ytDlp)) return false;
+
+            // yt-dlp needs ffmpeg to extract audio, so a missing one is not optional here.
+            await _provisioner.EnsureFfmpegAsync(status, _shutdown.Token).ConfigureAwait(false);
+            return true;
+        }
+
+        private void StartDownload(string url, IProgress<DownloadProgress> progress)
+        {
             _ytDlp.DownloadAsync(url, progress, _shutdown.Token).ContinueWith((Task<DownloadResult> task) => Post(() =>
             {
                 _downloadRunning = false;

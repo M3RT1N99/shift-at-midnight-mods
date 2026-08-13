@@ -22,11 +22,13 @@ namespace MidnightRadio
     internal sealed class AudioTranscoder
     {
         private readonly ToolLocator _tools;
+        private readonly ToolProvisioner _provisioner;
         private readonly string _cacheDirectory;
 
-        public AudioTranscoder(ToolLocator tools, string dataDirectory)
+        public AudioTranscoder(ToolLocator tools, ToolProvisioner provisioner, string dataDirectory)
         {
             _tools = tools;
+            _provisioner = provisioner;
             _cacheDirectory = Path.Combine(dataDirectory, "Cache", "converted");
         }
 
@@ -75,16 +77,24 @@ namespace MidnightRadio
                 return track.Path;
             }
 
-            if (ffmpeg == null || !ffmpeg.Found || string.IsNullOrEmpty(ffmpeg.ExecutablePath))
+            string ffmpegPath = ffmpeg != null && ffmpeg.Found ? ffmpeg.ExecutablePath : null;
+
+            // Nothing on the machine, so fetch it. Expecting the player to install a
+            // command-line tool before their music plays is not a reasonable ask.
+            if (string.IsNullOrEmpty(ffmpegPath) && _provisioner != null)
+                ffmpegPath = await _provisioner.EnsureFfmpegAsync(status, cancellationToken)
+                    .ConfigureAwait(false);
+
+            if (string.IsNullOrEmpty(ffmpegPath))
             {
                 Log.Warn($"'{track.Title}' is {Path.GetExtension(track.Path)}, which Unity will "
-                         + "not decode, and ffmpeg was not found - install ffmpeg to play it");
-                status?.Report("ffmpeg fehlt - MP3 kann nicht umgewandelt werden.");
+                         + "not decode, and ffmpeg is neither installed nor downloadable");
+                status?.Report("ffmpeg fehlt und konnte nicht geladen werden.");
                 return track.Path;
             }
 
             status?.Report($"Wandle '{track.Title}' um …");
-            return await ConvertAsync(ffmpeg.ExecutablePath, track, cached, cancellationToken)
+            return await ConvertAsync(ffmpegPath, track, cached, cancellationToken)
                        .ConfigureAwait(false)
                    ?? track.Path;
         }
