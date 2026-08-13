@@ -16,6 +16,10 @@ namespace MidnightRadio
         public const int CurrentVersion = 3;
 
         public int Version { get; set; } = CurrentVersion;
+
+        /// <summary>True when loading repaired this config and it should be written back.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool Migrated { get; private set; }
         public string Hotkey { get; set; } = "F4";
         public string Language { get; set; } = "auto";
         public List<string> MusicDirs { get; set; } = new List<string>();
@@ -187,6 +191,7 @@ namespace MidnightRadio
 
             int from = Version;
             Version = CurrentVersion;
+            Migrated = true;
 
             if (from < 3)
             {

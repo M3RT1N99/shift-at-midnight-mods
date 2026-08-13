@@ -26,6 +26,7 @@ namespace MidnightRadio
         private bool _open;
         private Rect _window = new(50f, 50f, 760f, 520f);
         private bool _placed;
+        private float _lastScreenWidth, _lastScreenHeight;
         private const int TracksPerPage = 8;
         private int _page;
         private string _search = string.Empty;
@@ -103,11 +104,18 @@ namespace MidnightRadio
             bool offScreen = _window.x < 0f || _window.y < 0f ||
                              _window.x + _window.width > screenWidth ||
                              _window.y + _window.height > screenHeight;
-            if (_placed && !offScreen) return;
+            bool resized = !Mathf.Approximately(_lastScreenWidth, screenWidth) ||
+                           !Mathf.Approximately(_lastScreenHeight, screenHeight);
+            if (_placed && !offScreen && !resized) return;
 
-            // Shrink to fit before centring, so the panel stays usable on small resolutions.
-            _window.width = Math.Min(_window.width, screenWidth - 40f);
-            _window.height = Math.Min(_window.height, screenHeight - 40f);
+            _lastScreenWidth = screenWidth;
+            _lastScreenHeight = screenHeight;
+
+            // Sized as a share of the screen rather than in fixed pixels: a 760x520 panel
+            // is comfortable at 1080p, a stamp at 4K and off the edge at 720p. The bounds
+            // keep it readable on very small screens and stop it swallowing very large ones.
+            _window.width = Math.Min(Math.Max(screenWidth * 0.55f, 640f), screenWidth - 40f);
+            _window.height = Math.Min(Math.Max(screenHeight * 0.62f, 440f), screenHeight - 40f);
             _window.x = (screenWidth - _window.width) * 0.5f;
             _window.y = (screenHeight - _window.height) * 0.5f;
             _placed = true;
@@ -140,40 +148,39 @@ namespace MidnightRadio
 
         private void DrawWindow(int id)
         {
-            GUILayout.BeginVertical();
+            
 
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Suche", GUILayout.Width(50f));
-            _search = GUILayout.TextField(_search ?? string.Empty);
-            if (GUILayout.Button("Neu laden", GUILayout.Width(100f))) _reload();
-            if (GUILayout.Button("Ordner", GUILayout.Width(70f))) OpenMusicDirectory();
-            GUILayout.EndHorizontal();
+            Ui.BeginRow();
+            Ui.Label("Suche", 50f);
+            _search = Ui.TextField(_search ?? string.Empty);
+            if (Ui.Button("Neu laden", 100f)) _reload();
+            if (Ui.Button("Ordner", 70f)) OpenMusicDirectory();
+            Ui.EndRow();
 
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("◀", GUILayout.Width(44f))) _previous();
-            if (GUILayout.Button(_player.IsPaused ? "Weiter" : "Pause", GUILayout.Width(75f)))
+            Ui.BeginRow();
+            if (Ui.Button("◀", 44f)) _previous();
+            if (Ui.Button(_player.IsPaused ? "Weiter" : "Pause", 75f))
                 _player.TogglePause();
-            if (GUILayout.Button("■", GUILayout.Width(44f))) _player.Stop();
-            if (GUILayout.Button("▶", GUILayout.Width(44f))) _next();
+            if (Ui.Button("■", 44f)) _player.Stop();
+            if (Ui.Button("▶", 44f)) _next();
 
-            bool muted = GUILayout.Toggle(_player.IsMuted, "Stumm", GUILayout.Width(80f));
+            bool muted = Ui.Toggle(_player.IsMuted, "Stumm", 80f);
             if (muted != _player.IsMuted) _player.SetMuted(muted);
 
-            GUILayout.Label($"Lautstärke {_config.Playback.Volume:P0}", GUILayout.Width(120f));
-            _config.Playback.Volume = GUILayout.HorizontalSlider(
-                _config.Playback.Volume, 0f, _config.Playback.VolumeCeiling,
-                GUILayout.Width(140f));
-            GUILayout.EndHorizontal();
+            Ui.Label($"Lautstärke {_config.Playback.Volume:P0}", 120f);
+            _config.Playback.Volume = Ui.Slider(
+                _config.Playback.Volume, 0f, _config.Playback.VolumeCeiling);
+            Ui.EndRow();
 
             var current = _player.CurrentTrack;
-            GUILayout.Label(current == null
+            Ui.Label(current == null
                 ? "Kein Titel geladen"
                 : $"Jetzt: {current.Title}  ({FormatTime(_player.PositionSeconds)})");
 
-            if (_player.IsLoading) GUILayout.Label("Lade Audio …");
+            if (_player.IsLoading) Ui.Label("Lade Audio …");
             if (!string.IsNullOrEmpty(_player.LastError))
-                GUILayout.Label("Fehler: " + _player.LastError);
-            if (!string.IsNullOrEmpty(_status)) GUILayout.Label(_status);
+                Ui.Label("Fehler: " + _player.LastError);
+            if (!string.IsNullOrEmpty(_status)) Ui.Label(_status);
 
             // Paged, not scrolled. GUILayout.BeginScrollView is stripped from this IL2CPP
             // build - the game uses no IMGUI scroll views of its own - and Il2CppInterop
@@ -199,52 +206,52 @@ namespace MidnightRadio
             for (int i = start; i < Math.Min(start + TracksPerPage, visible.Count); i++)
             {
                 var track = visible[i];
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("▶", GUILayout.Width(35f))) _play(track);
-                GUILayout.Label(track.Title);
-                GUILayout.Label(FormatBytes(track.SizeBytes), GUILayout.Width(85f));
-                GUILayout.EndHorizontal();
+                Ui.BeginRow();
+                if (Ui.Button("▶", 35f)) _play(track);
+                Ui.Label(track.Title);
+                Ui.Label(FormatBytes(track.SizeBytes), 85f);
+                Ui.EndRow();
             }
 
             if (visible.Count == 0)
-                GUILayout.Label(tracks.Count == 0
+                Ui.Label(tracks.Count == 0
                     ? "Keine Musik gefunden. Lege .ogg- oder .wav-Dateien in den Music-Ordner "
                       + "und klicke auf „Neu einlesen“."
                     : "Kein Titel passt zur Suche.");
 
             if (pageCount > 1)
             {
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("◀", GUILayout.Width(35f)) && _page > 0) _page--;
-                GUILayout.Label($"Seite {_page + 1} / {pageCount}   ({visible.Count} Titel)");
-                if (GUILayout.Button("▶", GUILayout.Width(35f)) && _page < pageCount - 1) _page++;
-                GUILayout.EndHorizontal();
+                Ui.BeginRow();
+                if (Ui.Button("◀", 35f) && _page > 0) _page--;
+                Ui.Label($"Seite {_page + 1} / {pageCount}   ({visible.Count} Titel)");
+                if (Ui.Button("▶", 35f) && _page < pageCount - 1) _page++;
+                Ui.EndRow();
             }
 
-            GUILayout.Space(8f);
+            Ui.Space(8f);
             DrawUrlSection();
 
-            GUILayout.EndVertical();
+            
             GUI.DragWindow(new Rect(0f, 0f, _window.width, 24f));
         }
 
         private void DrawUrlSection()
         {
-            GUILayout.Label("Link über yt-dlp laden (optional)");
+            Ui.Label("Link über yt-dlp laden (optional)");
 
             if (_showUrlNotice)
             {
-                GUILayout.BeginVertical(GUI.skin.box);
-                GUILayout.Label(
+                Ui.BeginRow(); Ui.EndRow();
+                Ui.Label(
                     "yt-dlp und ffmpeg werden nicht mitgeliefert oder automatisch geladen. " +
                     "Du bist selbst dafür verantwortlich, dass der Abruf und die Nutzung " +
                     "des Inhalts erlaubt sind. Der Link wird nur für deine lokale Wiedergabe " +
                     "geladen; Audiodaten werden nicht zwischen Spielern übertragen.");
-                _urlNoticeChecked = GUILayout.Toggle(
+                _urlNoticeChecked = Ui.Toggle(
                     _urlNoticeChecked, "Ich habe den Hinweis verstanden.");
-                GUILayout.BeginHorizontal();
+                Ui.BeginRow();
                 GUI.enabled = _urlNoticeChecked;
-                if (GUILayout.Button("URL-Modus aktivieren"))
+                if (Ui.Button("URL-Modus aktivieren"))
                 {
                     _config.UrlMode.NoticeAcceptedVersion = 1;
                     _config.UrlMode.AcceptedAt = DateTime.UtcNow.ToString("o");
@@ -253,13 +260,13 @@ namespace MidnightRadio
                     _saveConfig();
                 }
                 GUI.enabled = true;
-                if (GUILayout.Button("Abbrechen")) _showUrlNotice = false;
-                GUILayout.EndHorizontal();
-                GUILayout.EndVertical();
+                if (Ui.Button("Abbrechen")) _showUrlNotice = false;
+                Ui.EndRow();
+                
                 return;
             }
 
-            bool requested = GUILayout.Toggle(_config.UrlMode.Enabled, "URL-Modus aktiviert");
+            bool requested = Ui.Toggle(_config.UrlMode.Enabled, "URL-Modus aktiviert");
             if (requested != _config.UrlMode.Enabled)
             {
                 if (requested && _config.UrlMode.NoticeAcceptedVersion < 1)
@@ -275,16 +282,16 @@ namespace MidnightRadio
             }
 
             GUI.enabled = _config.UrlMode.Enabled;
-            GUILayout.BeginHorizontal();
-            _url = GUILayout.TextField(_url ?? string.Empty);
-            if (GUILayout.Button("Einfügen", GUILayout.Width(75f)))
+            Ui.BeginRow();
+            _url = Ui.TextField(_url ?? string.Empty);
+            if (Ui.Button("Einfügen", 75f))
                 _url = GUIUtility.systemCopyBuffer ?? string.Empty;
-            if (GUILayout.Button("Laden", GUILayout.Width(75f)))
+            if (Ui.Button("Laden", 75f))
             {
                 string value = (_url ?? string.Empty).Trim();
                 if (value.Length != 0) _downloadUrl(value);
             }
-            GUILayout.EndHorizontal();
+            Ui.EndRow();
             GUI.enabled = true;
         }
 

@@ -28,6 +28,7 @@ namespace MidnightRadio
 
         private RadioTarget _radio;
         private float _nextResolve;
+        private float _nextReceiveHookAttempt;
         private int _currentIndex = -1;
         private bool _reloadRunning;
         private bool _reloadPending;
@@ -42,6 +43,12 @@ namespace MidnightRadio
 
             SeedDefaultConfig();
             _config = Config.Load(_configPath);
+
+            // Persist immediately. Saving used to happen only when the panel closed or the
+            // mod shut down, so a migration was lost whenever the session ended abnormally -
+            // and then ran again on the next start, repeating whatever it had repaired.
+            if (_config.Migrated || !File.Exists(_configPath))
+                _config.Save(_configPath);
             Log.DebugEnabled = string.Equals(
                 _config.Logging.Level, "debug", StringComparison.OrdinalIgnoreCase);
 
@@ -63,10 +70,11 @@ namespace MidnightRadio
                 (track, offset) => MelonCoroutines.Start(_player.Play(track, offset)),
                 () => _player.Stop());
 
-            // Until this succeeds RunnerBridge stays not-receive-ready, which keeps sending
-            // disabled too. A client that transmits but cannot hear replies would look
-            // synced while silently drifting, so the two are gated together.
-            if (_config.Sync.Enabled) Sync.ReceiveHook.Apply(_transport);
+            // NOT applied here. Patching FusionCallbackBase.OnReliableDataReceived during
+            // mod init stops the game from reaching its first scene - verified by A/B test:
+            // with sync off the game boots, with it on the log ends right after mod init.
+            // Fusion is still wiring itself up at that point, so the patch is deferred to
+            // Update() and only applied once a session actually exists.
 
             // Interacting with the placed radio is the primary way into the panel; the
             // hotkey stays as a fallback for when the hook could not be installed.
@@ -98,6 +106,8 @@ namespace MidnightRadio
                 ResolveRadio();
             }
 
+            TryInstallReceiveHook(now);
+
             _player.Tick();
             _session.Tick(_radio != null && _radio.IsValid ? _radio.Playback : null);
             _ui.Tick();
@@ -115,6 +125,30 @@ namespace MidnightRadio
             _player.SetTarget(null);
             _radio = null;
             _nextResolve = 0f;
+        }
+
+        /// <summary>
+        /// Installs the Fusion receive hook late, and only while a session is actually
+        /// running.
+        ///
+        /// Applying it during mod init prevented the game from ever reaching a scene. The
+        /// A/B test was unambiguous: with Sync.Enabled false the game booted, with it true
+        /// the log stopped immediately after mod init. Fusion is still initialising at that
+        /// moment, so patching one of its callbacks there is too early.
+        ///
+        /// Waiting for a live runner also means the patch never exists in single-player,
+        /// where it has nothing to do anyway.
+        /// </summary>
+        private void TryInstallReceiveHook(float now)
+        {
+            if (!_config.Sync.Enabled) return;
+            if (Sync.ReceiveHook.Applied) return;
+            if (now < _nextReceiveHookAttempt) return;
+
+            _nextReceiveHookAttempt = now + 5f;
+            if (!Sync.RunnerBridge.IsRunning) return;
+
+            Sync.ReceiveHook.Apply(_transport);
         }
 
         private void ResolveRadio()
