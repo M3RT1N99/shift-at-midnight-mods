@@ -63,6 +63,11 @@ namespace MidnightRadio
                 (track, offset) => MelonCoroutines.Start(_player.Play(track, offset)),
                 () => _player.Stop());
 
+            // Until this succeeds RunnerBridge stays not-receive-ready, which keeps sending
+            // disabled too. A client that transmits but cannot hear replies would look
+            // synced while silently drifting, so the two are gated together.
+            if (_config.Sync.Enabled) Sync.ReceiveHook.Apply(_transport);
+
             _ui = new RadioUI(
                 _config,
                 _library,
@@ -316,6 +321,7 @@ namespace MidnightRadio
             _shutdown.Cancel();
             _shutdown.Dispose();
             _ui.Close();
+            Sync.ReceiveHook.Remove();
             _session.Dispose();
             _player.Dispose();
             SaveConfig();
