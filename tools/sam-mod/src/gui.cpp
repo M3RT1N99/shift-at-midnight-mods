@@ -460,10 +460,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     cls.lpszClassName = kWindowClass;
     RegisterClassExW(&cls);
 
+    // Centred on the monitor that currently holds the cursor, so it opens where the user
+    // is looking rather than wherever Windows would have stacked it.
+    constexpr int kWidth = 716, kHeight = 530;
+    int left = CW_USEDEFAULT, top = CW_USEDEFAULT;
+    {
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+
+        MONITORINFO info{};
+        info.cbSize = sizeof(info);
+        if (GetMonitorInfoW(monitor, &info)) {
+            const RECT& area = info.rcWork;
+            left = area.left + ((area.right - area.left) - kWidth) / 2;
+            top = area.top + ((area.bottom - area.top) - kHeight) / 2;
+        }
+    }
+
     HWND window = CreateWindowExW(
         0, kWindowClass, kTitle,
         WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 716, 530,
+        left, top, kWidth, kHeight,
         nullptr, nullptr, instance, nullptr);
     if (!window) return 1;
 

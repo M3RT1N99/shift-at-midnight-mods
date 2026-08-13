@@ -25,6 +25,7 @@ namespace MidnightRadio
 
         private bool _open;
         private Rect _window = new(50f, 50f, 760f, 520f);
+        private bool _placed;
         private const int TracksPerPage = 8;
         private int _page;
         private string _search = string.Empty;
@@ -78,11 +79,7 @@ namespace MidnightRadio
             // The game may re-lock the cursor from its own Update callback. Reassert the
             // panel's cursor state for as long as it is visible, then restore the exact
             // previous state in Close().
-            if (_open)
-            {
-                Cursor.visible = true;
-                Cursor.lockState = CursorLockMode.None;
-            }
+            if (_open) InputLock.Tick();
         }
 
         public void Draw()
@@ -93,10 +90,34 @@ namespace MidnightRadio
 
         public void SetStatus(string status) => _status = status ?? string.Empty;
 
+        /// <summary>
+        /// Centres the panel the first time it opens, and again if a resolution change has
+        /// left it partly off-screen. A position the player dragged to is otherwise kept.
+        /// </summary>
+        private void CentreIfNeeded()
+        {
+            float screenWidth = Screen.width;
+            float screenHeight = Screen.height;
+            if (screenWidth <= 0f || screenHeight <= 0f) return;
+
+            bool offScreen = _window.x < 0f || _window.y < 0f ||
+                             _window.x + _window.width > screenWidth ||
+                             _window.y + _window.height > screenHeight;
+            if (_placed && !offScreen) return;
+
+            // Shrink to fit before centring, so the panel stays usable on small resolutions.
+            _window.width = Math.Min(_window.width, screenWidth - 40f);
+            _window.height = Math.Min(_window.height, screenHeight - 40f);
+            _window.x = (screenWidth - _window.width) * 0.5f;
+            _window.y = (screenHeight - _window.height) * 0.5f;
+            _placed = true;
+        }
+
         public void Close()
         {
             if (!_open) return;
             _open = false;
+            InputLock.Unlock();
             Cursor.visible = _cursorWasVisible;
             Cursor.lockState = _cursorWasLocked;
             _saveConfig();
@@ -108,8 +129,10 @@ namespace MidnightRadio
         /// </summary>
         public void Open()
         {
+            CentreIfNeeded();
             _cursorWasVisible = Cursor.visible;
             _cursorWasLocked = Cursor.lockState;
+            InputLock.Lock();
             _open = true;
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;

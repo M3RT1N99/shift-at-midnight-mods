@@ -108,6 +108,13 @@ namespace UnityEngine
     }
 
     public static class Input { public static bool GetKeyDown(KeyCode key) => false; }
+
+    // Settable so a test can pin a resolution and check the panel centres inside it.
+    public static class Screen
+    {
+        public static int width { get; set; } = 1920;
+        public static int height { get; set; } = 1080;
+    }
     public static class Cursor
     {
         public static bool visible { get; set; }
@@ -193,5 +200,17 @@ namespace UnityEngine.Networking
     {
         public static UnityWebRequest GetAudioClip(string uri, UnityEngine.AudioType type) =>
             new() { downloadHandler = new DownloadHandlerAudioClip() };
+    }
+}
+
+namespace UnityEngine.InputSystem
+{
+    // Enough of PlayerInput for InputLock to compile. The stub owns no input, so the
+    // suspend/restore behaviour is exercised in-game rather than here.
+    public class PlayerInput : Object
+    {
+        public bool inputIsActive { get; private set; } = true;
+        public void DeactivateInput() => inputIsActive = false;
+        public void ActivateInput() => inputIsActive = true;
     }
 }
