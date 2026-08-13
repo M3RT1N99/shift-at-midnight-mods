@@ -34,10 +34,11 @@ namespace OsamaBinLaden.Multiplayer
     {
         Hello = 1,
         HelloAck = 2,
-        Spawn = 3,
-        Detonate = 4,
-        Cancel = 5,
-        Heartbeat = 6
+        Ready = 3,
+        Spawn = 4,
+        Detonate = 5,
+        Cancel = 6,
+        Heartbeat = 7
     }
 
     internal enum EncounterReason : byte
@@ -80,20 +81,24 @@ namespace OsamaBinLaden.Multiplayer
     }
 
     /// <summary>
-    /// A fixed-size protocol message. SessionNonce, Sequence, EncounterId and HostTick are
-    /// anti-replay inputs; the session layer must remember the accepted nonce/sequence/tick.
-    /// This data is not authentication. In particular, the receiver must compare the Fusion
-    /// sender with its authoritative host before accepting Spawn, Detonate or Cancel.
+    /// A fixed-size protocol message. HostEpoch, both challenge nonces, Sequence, EncounterId
+    /// and HostTick are anti-replay inputs. The session layer must verify echoed challenges and
+    /// remember the accepted epoch/sequence/tick. This data is not authentication: the receiver
+    /// must compare the Fusion sender with its authoritative host for every host-only message.
     /// </summary>
     internal sealed class EncounterMessage
     {
         public EncounterMessageType Type { get; set; }
         public EncounterReason Reason { get; set; }
         public ulong Sequence { get; set; }
-        public ulong SessionNonce { get; set; }
+        public ulong HostEpoch { get; set; }
+        public ulong ClientNonce { get; set; }
+        public ulong HostNonce { get; set; }
         public ulong EncounterId { get; set; }
-        public int HostPlayerId { get; set; }
-        public int TargetPlayerId { get; set; }
+        public int HostPlayerId { get; set; } = -1;
+        public int TargetPlayerId { get; set; } = -1;
+        public int TargetPlayerRawEncoded { get; set; }
+        public uint TargetNetworkId { get; set; }
         public ulong HostTick { get; set; }
         public float SpawnX { get; set; }
         public float SpawnY { get; set; }
@@ -110,12 +115,13 @@ namespace OsamaBinLaden.Multiplayer
         // Bytes on the wire are 4f 42 4c 4e ("OBLN").
         internal const uint Magic = 0x4e4c424fU;
         internal const ushort Version = 1;
-        internal const int PacketSize = 96;
+        internal const int PacketSize = 120;
         internal const int HeaderSize = 12;
         internal const int PayloadSize = PacketSize - HeaderSize;
 
         internal const float MaximumCoordinateMagnitude = 10_000f;
         internal const int MaximumPlayerId = 65_535;
+        internal const int MaximumPlayerRawEncoded = MaximumPlayerId + 1;
 
         // Four non-zero, stable integers. The final word includes protocol major/minor 1.0.
         internal static readonly ReliableKey4 ReliableKey = new ReliableKey4(
@@ -125,9 +131,11 @@ namespace OsamaBinLaden.Multiplayer
             unchecked((int)0x00010000));
 
         internal static bool RequiresHostSender(EncounterMessageType type) =>
+            type == EncounterMessageType.HelloAck ||
             type == EncounterMessageType.Spawn ||
             type == EncounterMessageType.Detonate ||
-            type == EncounterMessageType.Cancel;
+            type == EncounterMessageType.Cancel ||
+            type == EncounterMessageType.Heartbeat;
 
         internal static bool TryEncode(EncounterMessage message, out byte[] packet)
         {
@@ -145,10 +153,14 @@ namespace OsamaBinLaden.Multiplayer
                 writer.TryWriteUInt16(PayloadSize) &&
                 writer.TryWriteUInt16(0) && // Reserved flags; must remain zero in v1.
                 writer.TryWriteUInt64(message.Sequence) &&
-                writer.TryWriteUInt64(message.SessionNonce) &&
+                writer.TryWriteUInt64(message.HostEpoch) &&
+                writer.TryWriteUInt64(message.ClientNonce) &&
+                writer.TryWriteUInt64(message.HostNonce) &&
                 writer.TryWriteUInt64(message.EncounterId) &&
                 writer.TryWriteInt32(message.HostPlayerId) &&
                 writer.TryWriteInt32(message.TargetPlayerId) &&
+                writer.TryWriteInt32(message.TargetPlayerRawEncoded) &&
+                writer.TryWriteUInt32(message.TargetNetworkId) &&
                 writer.TryWriteUInt64(message.HostTick) &&
                 writer.TryWriteSingle(message.SpawnX) &&
                 writer.TryWriteSingle(message.SpawnY) &&
@@ -196,10 +208,14 @@ namespace OsamaBinLaden.Multiplayer
             };
 
             if (!reader.TryReadUInt64(out ulong sequence) ||
-                !reader.TryReadUInt64(out ulong sessionNonce) ||
+                !reader.TryReadUInt64(out ulong hostEpoch) ||
+                !reader.TryReadUInt64(out ulong clientNonce) ||
+                !reader.TryReadUInt64(out ulong hostNonce) ||
                 !reader.TryReadUInt64(out ulong encounterId) ||
                 !reader.TryReadInt32(out int hostPlayerId) ||
                 !reader.TryReadInt32(out int targetPlayerId) ||
+                !reader.TryReadInt32(out int targetPlayerRawEncoded) ||
+                !reader.TryReadUInt32(out uint targetNetworkId) ||
                 !reader.TryReadUInt64(out ulong hostTick) ||
                 !reader.TryReadSingle(out float spawnX) ||
                 !reader.TryReadSingle(out float spawnY) ||
@@ -218,10 +234,14 @@ namespace OsamaBinLaden.Multiplayer
             }
 
             candidate.Sequence = sequence;
-            candidate.SessionNonce = sessionNonce;
+            candidate.HostEpoch = hostEpoch;
+            candidate.ClientNonce = clientNonce;
+            candidate.HostNonce = hostNonce;
             candidate.EncounterId = encounterId;
             candidate.HostPlayerId = hostPlayerId;
             candidate.TargetPlayerId = targetPlayerId;
+            candidate.TargetPlayerRawEncoded = targetPlayerRawEncoded;
+            candidate.TargetNetworkId = targetNetworkId;
             candidate.HostTick = hostTick;
             candidate.SpawnX = spawnX;
             candidate.SpawnY = spawnY;
@@ -249,9 +269,10 @@ namespace OsamaBinLaden.Multiplayer
                 !IsKnownType((byte)message.Type) ||
                 !IsKnownReason((byte)message.Reason) ||
                 message.Sequence == 0 ||
-                message.SessionNonce == 0 ||
-                message.HostPlayerId < 0 || message.HostPlayerId > MaximumPlayerId ||
+                message.HostPlayerId < -1 || message.HostPlayerId > MaximumPlayerId ||
                 message.TargetPlayerId < -1 || message.TargetPlayerId > MaximumPlayerId ||
+                message.TargetPlayerRawEncoded < 0 ||
+                message.TargetPlayerRawEncoded > MaximumPlayerRawEncoded ||
                 !IsCoordinate(message.SpawnX) ||
                 !IsCoordinate(message.SpawnY) ||
                 !IsCoordinate(message.SpawnZ) ||
@@ -260,16 +281,67 @@ namespace OsamaBinLaden.Multiplayer
                 return false;
             }
 
-            bool encounterRequired =
-                message.Type == EncounterMessageType.Spawn ||
-                message.Type == EncounterMessageType.Detonate ||
-                message.Type == EncounterMessageType.Cancel;
+            switch (message.Type)
+            {
+                case EncounterMessageType.Hello:
+                    // The initial packet contributes only the client's challenge. Identity is
+                    // taken from Fusion's sender metadata, never trusted from this packet.
+                    return message.Reason == EncounterReason.None &&
+                           message.ClientNonce != 0 &&
+                           message.HostEpoch == 0 &&
+                           message.HostNonce == 0 &&
+                           HasNoEncounterOrTarget(message) &&
+                           message.HostPlayerId == -1 &&
+                           message.HostTick == 0;
 
-            if (encounterRequired && (message.EncounterId == 0 || message.TargetPlayerId < 0))
-                return false;
+                case EncounterMessageType.HelloAck:
+                    // The session layer additionally verifies that ClientNonce equals Hello.
+                    return message.Reason == EncounterReason.None &&
+                           HasAllChallenges(message) &&
+                           HasHostIdentity(message) &&
+                           HasNoEncounterOrTarget(message);
 
-            return true;
+                case EncounterMessageType.Ready:
+                    // The session layer verifies both echoed nonces before marking this peer ready.
+                    return message.Reason == EncounterReason.None &&
+                           HasAllChallenges(message) &&
+                           HasHostIdentity(message) &&
+                           HasNoEncounterOrTarget(message);
+
+                case EncounterMessageType.Spawn:
+                case EncounterMessageType.Detonate:
+                case EncounterMessageType.Cancel:
+                    return HasAllChallenges(message) &&
+                           HasHostIdentity(message) &&
+                           message.EncounterId != 0 &&
+                           HasFullTarget(message);
+
+                case EncounterMessageType.Heartbeat:
+                    return message.Reason == EncounterReason.None &&
+                           HasAllChallenges(message) &&
+                           HasHostIdentity(message) &&
+                           HasNoEncounterOrTarget(message);
+
+                default:
+                    return false;
+            }
         }
+
+        private static bool HasAllChallenges(EncounterMessage message) =>
+            message.HostEpoch != 0 && message.ClientNonce != 0 && message.HostNonce != 0;
+
+        private static bool HasHostIdentity(EncounterMessage message) => message.HostPlayerId >= 0;
+
+        private static bool HasFullTarget(EncounterMessage message) =>
+            message.TargetPlayerId >= 0 &&
+            message.TargetPlayerRawEncoded > 0 &&
+            message.TargetNetworkId != 0;
+
+        private static bool HasNoEncounterOrTarget(EncounterMessage message) =>
+            message.EncounterId == 0 &&
+            message.TargetPlayerId == -1 &&
+            message.TargetPlayerRawEncoded == 0 &&
+            message.TargetNetworkId == 0;
 
         private static bool IsConfigValid(EncounterConfigSnapshot config) =>
             IsInRange(config.RunSpeed, 1f, 20f) &&

@@ -56,6 +56,8 @@
     <Reference Include="UnityEngine.PhysicsModule" HintPath="$(InteropDir)\UnityEngine.PhysicsModule.dll" Private="false" />
     <Reference Include="Assembly-CSharp" HintPath="$(InteropDir)\Assembly-CSharp.dll" Private="false" />
     <Reference Include="Il2CppFusion.Runtime" HintPath="$(InteropDir)\Il2CppFusion.Runtime.dll" Private="false" />
+    <Reference Include="Il2CppFusion.Sockets" HintPath="$(InteropDir)\Il2CppFusion.Sockets.dll" Private="false" />
+    <Reference Include="Il2CppFusion.Realtime" HintPath="$(InteropDir)\Il2CppFusion.Realtime.dll" Private="false" />
   </ItemGroup>
 
 </Project>

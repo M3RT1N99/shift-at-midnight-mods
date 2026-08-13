@@ -1,34 +1,51 @@
-using Il2Cpp;
+extern alias il2cpp;
+
 using Il2CppFusion;
-using UnityEngine;
+using Il2CppFusion.Sockets;
+using Il2CppInterop.Runtime;
+using Il2CppInterop.Runtime.InteropTypes;
 
 namespace OsamaBinLaden
 {
-    internal static class CompileProbe
+    internal sealed class CompileProbe
     {
-        public static PlayerManager Find(PlayerRef player)
-        {
-            var network = FusionNetworkManager.Instance;
-            NetworkObject playerObject = network?.GetPlayer(player);
-            if (playerObject != null)
-            {
-                PlayerManager direct = playerObject.GetComponent<PlayerManager>();
-                if (direct != null) return direct;
-                PlayerManager child = playerObject.GetComponentInChildren<PlayerManager>(true);
-                if (child != null) return child;
-            }
+        private NetworkDelegates _delegates;
+        private INetworkRunnerCallbacks _callbacks;
+        private System.Action<NetworkRunner, PlayerRef, ReliableKey, il2cpp::Il2CppSystem.ArraySegment<byte>> _managed;
+        private il2cpp::Il2CppSystem.Action<NetworkRunner, PlayerRef, ReliableKey, il2cpp::Il2CppSystem.ArraySegment<byte>> _native;
 
-            StoreManager store = StoreManager.Instance;
-            var players = store?.playerMans;
-            if (players == null) return null;
-            for (int index = 0; index < players.Count; index++)
-            {
-                PlayerManager candidate = players[index];
-                if (candidate != null && candidate.Object != null &&
-                    candidate.Object.InputAuthority.PlayerId == player.PlayerId)
-                    return candidate;
-            }
-            return null;
+        public void Add(NetworkRunner runner)
+        {
+            _delegates = new NetworkDelegates();
+            _managed = Received;
+            _native = DelegateSupport.ConvertDelegate<
+                il2cpp::Il2CppSystem.Action<NetworkRunner, PlayerRef, ReliableKey,
+                    il2cpp::Il2CppSystem.ArraySegment<byte>>>(_managed);
+            _delegates.OnReliableDataReceived = _native;
+            _callbacks = _delegates.Cast<INetworkRunnerCallbacks>();
+            runner.AddCallbacks(_callbacks);
         }
+
+        public void Remove(NetworkRunner runner) => runner.RemoveCallbacks(_callbacks);
+
+        public bool Publish(NetworkRunner runner)
+        {
+            var properties = new Il2CppSystem.Collections.Generic.Dictionary<string, SessionProperty>();
+            properties.Add("obln", (SessionProperty)1);
+            return runner.SessionInfo != null && runner.SessionInfo.IsValid &&
+                   runner.SessionInfo.UpdateCustomProperties(properties);
+        }
+
+        public bool Marker(NetworkRunner runner)
+        {
+            SessionProperty marker;
+            return runner.SessionInfo != null && runner.SessionInfo.IsValid &&
+                   runner.SessionInfo.Properties != null &&
+                   runner.SessionInfo.Properties.TryGetValue("obln", out marker) &&
+                   marker != null && marker.IsInt && (int)marker == 1;
+        }
+
+        private void Received(NetworkRunner runner, PlayerRef player, ReliableKey key,
+            il2cpp::Il2CppSystem.ArraySegment<byte> data) { }
     }
 }

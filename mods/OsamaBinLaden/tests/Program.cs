@@ -30,6 +30,7 @@ internal static class Program
             Run("Encounter protocol rejects every truncation", TestProtocolTruncation);
             Run("Encounter protocol rejects wrong magic and version", TestProtocolHeaderValidation);
             Run("Encounter protocol enforces extreme caps", TestProtocolCaps);
+            Run("Encounter protocol enforces three-way handshake shapes", TestProtocolHandshakeValidation);
             Run("Encounter protocol marks authoritative messages", TestProtocolAuthorityMetadata);
         }
         finally
@@ -46,7 +47,7 @@ internal static class Program
 
         if (Failures.Count == 0)
         {
-            Console.WriteLine("PASS: all 14 smoke tests passed");
+            Console.WriteLine("PASS: all 15 smoke tests passed");
             return 0;
         }
 
@@ -220,6 +221,7 @@ internal static class Program
         {
             EncounterMessageType.Hello,
             EncounterMessageType.HelloAck,
+            EncounterMessageType.Ready,
             EncounterMessageType.Spawn,
             EncounterMessageType.Detonate,
             EncounterMessageType.Cancel,
@@ -244,10 +246,14 @@ internal static class Program
             Equal(source.Type, decoded.Type, type + " type");
             Equal(source.Reason, decoded.Reason, type + " reason");
             Equal(source.Sequence, decoded.Sequence, type + " sequence");
-            Equal(source.SessionNonce, decoded.SessionNonce, type + " nonce");
+            Equal(source.HostEpoch, decoded.HostEpoch, type + " host epoch");
+            Equal(source.ClientNonce, decoded.ClientNonce, type + " client nonce");
+            Equal(source.HostNonce, decoded.HostNonce, type + " host nonce");
             Equal(source.EncounterId, decoded.EncounterId, type + " encounter id");
             Equal(source.HostPlayerId, decoded.HostPlayerId, type + " host id");
             Equal(source.TargetPlayerId, decoded.TargetPlayerId, type + " target id");
+            Equal(source.TargetPlayerRawEncoded, decoded.TargetPlayerRawEncoded, type + " target raw id");
+            Equal(source.TargetNetworkId, decoded.TargetNetworkId, type + " target network id");
             Equal(source.HostTick, decoded.HostTick, type + " host tick");
             Near(source.SpawnX, decoded.SpawnX, type + " spawn x");
             Near(source.SpawnY, decoded.SpawnY, type + " spawn y");
@@ -321,6 +327,7 @@ internal static class Program
         EncounterMessage boundary = CreateProtocolMessage(EncounterMessageType.Spawn);
         boundary.HostPlayerId = EncounterProtocol.MaximumPlayerId;
         boundary.TargetPlayerId = EncounterProtocol.MaximumPlayerId;
+        boundary.TargetPlayerRawEncoded = EncounterProtocol.MaximumPlayerRawEncoded;
         boundary.SpawnX = -EncounterProtocol.MaximumCoordinateMagnitude;
         boundary.SpawnY = EncounterProtocol.MaximumCoordinateMagnitude;
         boundary.SpawnZ = 0f;
@@ -347,8 +354,16 @@ internal static class Program
         Equal(false, EncounterProtocol.TryEncode(invalid, out _), "zero sequence");
 
         invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
-        invalid.SessionNonce = 0;
-        Equal(false, EncounterProtocol.TryEncode(invalid, out _), "zero nonce");
+        invalid.ClientNonce = 0;
+        Equal(false, EncounterProtocol.TryEncode(invalid, out _), "zero client nonce");
+
+        invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
+        invalid.HostNonce = 0;
+        Equal(false, EncounterProtocol.TryEncode(invalid, out _), "zero host nonce");
+
+        invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
+        invalid.HostEpoch = 0;
+        Equal(false, EncounterProtocol.TryEncode(invalid, out _), "zero host epoch");
 
         invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
         invalid.EncounterId = 0;
@@ -357,6 +372,14 @@ internal static class Program
         invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
         invalid.TargetPlayerId = -1;
         Equal(false, EncounterProtocol.TryEncode(invalid, out _), "missing spawn target");
+
+        invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
+        invalid.TargetPlayerRawEncoded = 0;
+        Equal(false, EncounterProtocol.TryEncode(invalid, out _), "missing target raw id");
+
+        invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
+        invalid.TargetNetworkId = 0;
+        Equal(false, EncounterProtocol.TryEncode(invalid, out _), "missing target network id");
 
         invalid = CreateProtocolMessage(EncounterMessageType.Spawn);
         EncounterConfigSnapshot invalidConfig = invalid.Config;
@@ -370,19 +393,65 @@ internal static class Program
         invalid.Config = invalidConfig;
         Equal(false, EncounterProtocol.TryEncode(invalid, out _), "NaN config");
 
-        // Speed starts at byte 64. Mutating a valid packet proves decode revalidates values,
+        // Speed starts at byte 88. Mutating a valid packet proves decode revalidates values,
         // instead of trusting packets merely because their fixed framing is intact.
         byte[] hostile = (byte[])boundaryPacket.Clone();
         byte[] infinity = BitConverter.GetBytes(float.PositiveInfinity);
         if (!BitConverter.IsLittleEndian) Array.Reverse(infinity);
-        Buffer.BlockCopy(infinity, 0, hostile, 64, 4);
+        Buffer.BlockCopy(infinity, 0, hostile, 88, 4);
         Equal(false, EncounterProtocol.TryDecode(hostile, out _), "infinite decoded speed");
+    }
+
+    private static void TestProtocolHandshakeValidation()
+    {
+        EncounterMessage hello = CreateProtocolMessage(EncounterMessageType.Hello);
+        Equal(true, EncounterProtocol.TryEncode(hello, out _), "valid hello");
+
+        hello.ClientNonce = 0;
+        Equal(false, EncounterProtocol.TryEncode(hello, out _), "hello needs client challenge");
+
+        hello = CreateProtocolMessage(EncounterMessageType.Hello);
+        hello.HostEpoch = 1;
+        Equal(false, EncounterProtocol.TryEncode(hello, out _), "hello cannot claim host epoch");
+
+        hello = CreateProtocolMessage(EncounterMessageType.Hello);
+        hello.HostNonce = 1;
+        Equal(false, EncounterProtocol.TryEncode(hello, out _), "hello cannot claim host challenge");
+
+        EncounterMessage ack = CreateProtocolMessage(EncounterMessageType.HelloAck);
+        Equal(true, EncounterProtocol.TryEncode(ack, out _), "valid hello ack");
+        ack.ClientNonce = 0;
+        Equal(false, EncounterProtocol.TryEncode(ack, out _), "ack needs echoed client challenge");
+
+        ack = CreateProtocolMessage(EncounterMessageType.HelloAck);
+        ack.HostNonce = 0;
+        Equal(false, EncounterProtocol.TryEncode(ack, out _), "ack needs host challenge");
+
+        ack = CreateProtocolMessage(EncounterMessageType.HelloAck);
+        ack.HostEpoch = 0;
+        Equal(false, EncounterProtocol.TryEncode(ack, out _), "ack needs host epoch");
+
+        EncounterMessage ready = CreateProtocolMessage(EncounterMessageType.Ready);
+        Equal(true, EncounterProtocol.TryEncode(ready, out _), "valid ready");
+        ready.HostNonce = 0;
+        Equal(false, EncounterProtocol.TryEncode(ready, out _), "ready echoes host challenge");
+
+        ready = CreateProtocolMessage(EncounterMessageType.Ready);
+        ready.EncounterId = 1;
+        Equal(false, EncounterProtocol.TryEncode(ready, out _), "ready is not an encounter");
+
+        EncounterMessage heartbeat = CreateProtocolMessage(EncounterMessageType.Heartbeat);
+        Equal(true, EncounterProtocol.TryEncode(heartbeat, out _), "valid heartbeat");
+        heartbeat.TargetNetworkId = 1;
+        Equal(false, EncounterProtocol.TryEncode(heartbeat, out _), "heartbeat has no target object");
     }
 
     private static void TestProtocolAuthorityMetadata()
     {
         Equal(false, EncounterProtocol.RequiresHostSender(EncounterMessageType.Hello), "hello sender");
-        Equal(false, EncounterProtocol.RequiresHostSender(EncounterMessageType.Heartbeat), "heartbeat sender");
+        Equal(true, EncounterProtocol.RequiresHostSender(EncounterMessageType.HelloAck), "hello ack sender");
+        Equal(false, EncounterProtocol.RequiresHostSender(EncounterMessageType.Ready), "ready sender");
+        Equal(true, EncounterProtocol.RequiresHostSender(EncounterMessageType.Heartbeat), "heartbeat sender");
         Equal(true, EncounterProtocol.RequiresHostSender(EncounterMessageType.Spawn), "spawn sender");
         Equal(true, EncounterProtocol.RequiresHostSender(EncounterMessageType.Detonate), "detonate sender");
         Equal(true, EncounterProtocol.RequiresHostSender(EncounterMessageType.Cancel), "cancel sender");
@@ -390,25 +459,32 @@ internal static class Program
 
     private static EncounterMessage CreateProtocolMessage(EncounterMessageType type)
     {
+        bool encounter = type == EncounterMessageType.Spawn ||
+                         type == EncounterMessageType.Detonate ||
+                         type == EncounterMessageType.Cancel;
+        bool hello = type == EncounterMessageType.Hello;
+
         return new EncounterMessage
         {
             Type = type,
-            Reason = type == EncounterMessageType.Detonate
-                ? EncounterReason.ReachedTarget
-                : EncounterReason.HuntStarted,
+            Reason = !encounter
+                ? EncounterReason.None
+                : type == EncounterMessageType.Detonate
+                    ? EncounterReason.ReachedTarget
+                    : EncounterReason.HuntStarted,
             Sequence = 0x0102030405060708UL,
-            SessionNonce = 0xf1e2d3c4b5a69788UL,
-            EncounterId = type == EncounterMessageType.Hello ||
-                          type == EncounterMessageType.HelloAck ||
-                          type == EncounterMessageType.Heartbeat
-                ? 0UL
-                : 0x1122334455667788UL,
-            HostPlayerId = 1,
-            TargetPlayerId = 2,
-            HostTick = 0x8877665544332211UL,
-            SpawnX = -12.5f,
-            SpawnY = 3.25f,
-            SpawnZ = 99.75f,
+            HostEpoch = hello ? 0UL : 0x1111222233334444UL,
+            ClientNonce = 0xf1e2d3c4b5a69788UL,
+            HostNonce = hello ? 0UL : 0x1020304050607080UL,
+            EncounterId = encounter ? 0x1122334455667788UL : 0UL,
+            HostPlayerId = hello ? -1 : 1,
+            TargetPlayerId = encounter ? 2 : -1,
+            TargetPlayerRawEncoded = encounter ? 3 : 0,
+            TargetNetworkId = encounter ? 0xaabbccddU : 0U,
+            HostTick = hello ? 0UL : 0x8877665544332211UL,
+            SpawnX = encounter ? -12.5f : 0f,
+            SpawnY = encounter ? 3.25f : 0f,
+            SpawnZ = encounter ? 99.75f : 0f,
             Config = new EncounterConfigSnapshot
             {
                 RunSpeed = 7.5f,

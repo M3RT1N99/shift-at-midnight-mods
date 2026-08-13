@@ -53,7 +53,14 @@ namespace MidnightRadio
             // reliable data and falls back to local-only playback if not. Turning the
             // defaults off would disable the feature for everyone rather than only where
             // it cannot work.
-            public bool Enabled { get; set; } = true;
+            // OFF for the 1.1.0 release only, and this is not a reversal of the design:
+            // the transport, clock, session and open-queue authority are all implemented and
+            // the defaults below still describe the intended behaviour. What is missing is
+            // one live confirmation. Applying the Fusion receive hook during mod init stopped
+            // the game reaching a scene; it is now deferred until a session exists, but that
+            // path has never run in real co-op. Shipping it on would risk hanging a
+            // stranger's session at join time. Flip this back once it is verified.
+            public bool Enabled { get; set; }
             public int  ProtocolVersion { get; set; } = 1;
 
             public bool AcceptFromOthers { get; set; } = true;
