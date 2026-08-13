@@ -68,6 +68,10 @@ namespace MidnightRadio
             // synced while silently drifting, so the two are gated together.
             if (_config.Sync.Enabled) Sync.ReceiveHook.Apply(_transport);
 
+            // Interacting with the placed radio is the primary way into the panel; the
+            // hotkey stays as a fallback for when the hook could not be installed.
+            RadioInteraction.Apply(() => _radio?.Root, () => _ui.Open());
+
             _ui = new RadioUI(
                 _config,
                 _library,
@@ -121,7 +125,14 @@ namespace MidnightRadio
                 if (found == null) return;
                 _radio = found;
                 _player.SetTarget(found);
-                _ui.SetStatus("Radio gefunden.");
+
+                // The prompt otherwise still reads "Toggle Music", which is no longer what
+                // interacting does.
+                RadioInteraction.RelabelPrompt(found.Root, "Radio");
+
+                _ui.SetStatus(RadioInteraction.Applied
+                    ? "Radio gefunden. Interagiere damit, um das Menü zu öffnen."
+                    : $"Radio gefunden. Menü über {_config.Hotkey}.");
                 Log.Info("adopted placed boombox audio source");
             });
         }
@@ -321,6 +332,7 @@ namespace MidnightRadio
             _shutdown.Cancel();
             _shutdown.Dispose();
             _ui.Close();
+            RadioInteraction.Remove();
             Sync.ReceiveHook.Remove();
             _session.Dispose();
             _player.Dispose();

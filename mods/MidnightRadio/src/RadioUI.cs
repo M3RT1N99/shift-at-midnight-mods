@@ -101,7 +101,11 @@ namespace MidnightRadio
             _saveConfig();
         }
 
-        private void Open()
+        /// <summary>
+        /// Also called when the player interacts with the radio in the world, which is the
+        /// primary way in - the hotkey is the fallback.
+        /// </summary>
+        public void Open()
         {
             _cursorWasVisible = Cursor.visible;
             _cursorWasLocked = Cursor.lockState;

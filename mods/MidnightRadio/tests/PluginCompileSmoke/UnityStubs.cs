@@ -25,6 +25,10 @@ namespace UnityEngine
         public SceneManagement.Scene scene { get; set; } = new SceneManagement.Scene(true, true);
         public Transform transform { get; }
         public T AddComponent<T>() where T : new() => new();
+
+        // The stub carries no component graph, so this returns nothing. That is enough for
+        // the compile smoke test; the real behaviour is exercised in-game.
+        public T[] GetComponentsInChildren<T>(bool includeInactive = false) => Array.Empty<T>();
     }
 
     public class Transform : Object
