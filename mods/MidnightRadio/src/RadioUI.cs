@@ -25,7 +25,8 @@ namespace MidnightRadio
 
         private bool _open;
         private Rect _window = new(50f, 50f, 760f, 520f);
-        private Vector2 _scroll;
+        private const int TracksPerPage = 8;
+        private int _page;
         private string _search = string.Empty;
         private string _url = string.Empty;
         private string _status = string.Empty;
@@ -151,26 +152,51 @@ namespace MidnightRadio
                 GUILayout.Label("Fehler: " + _player.LastError);
             if (!string.IsNullOrEmpty(_status)) GUILayout.Label(_status);
 
-            _scroll = GUILayout.BeginScrollView(_scroll, GUI.skin.box);
+            // Paged, not scrolled. GUILayout.BeginScrollView is stripped from this IL2CPP
+            // build - the game uses no IMGUI scroll views of its own - and Il2CppInterop
+            // cannot unstrip it, so calling it throws "Method unstripping failed" on every
+            // OnGUI frame. Paging needs only Label, Button and BeginHorizontal, all of
+            // which are present because the game itself uses them.
             IReadOnlyList<TrackInfo> tracks = _library.Snapshot;
             string needle = (_search ?? string.Empty).Trim();
+
+            var visible = new List<TrackInfo>();
             foreach (var track in tracks)
             {
                 if (needle.Length > 0 &&
                     track.Title.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
                     continue;
+                visible.Add(track);
+            }
 
+            int pageCount = Math.Max(1, (visible.Count + TracksPerPage - 1) / TracksPerPage);
+            _page = Math.Min(Math.Max(_page, 0), pageCount - 1);
+            int start = _page * TracksPerPage;
+
+            for (int i = start; i < Math.Min(start + TracksPerPage, visible.Count); i++)
+            {
+                var track = visible[i];
                 GUILayout.BeginHorizontal();
                 if (GUILayout.Button("▶", GUILayout.Width(35f))) _play(track);
                 GUILayout.Label(track.Title);
                 GUILayout.Label(FormatBytes(track.SizeBytes), GUILayout.Width(85f));
                 GUILayout.EndHorizontal();
             }
-            GUILayout.EndScrollView();
 
-            GUILayout.Label(
-                "Lokale Titel werden per Inhalts-Hash indexiert. Dieser Entwicklungsstand " +
-                "überträgt weder Titelkennungen noch Audiodateien an Mitspieler.");
+            if (visible.Count == 0)
+                GUILayout.Label(tracks.Count == 0
+                    ? "Keine Musik gefunden. Lege .ogg- oder .wav-Dateien in den Music-Ordner "
+                      + "und klicke auf „Neu einlesen“."
+                    : "Kein Titel passt zur Suche.");
+
+            if (pageCount > 1)
+            {
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("◀", GUILayout.Width(35f)) && _page > 0) _page--;
+                GUILayout.Label($"Seite {_page + 1} / {pageCount}   ({visible.Count} Titel)");
+                if (GUILayout.Button("▶", GUILayout.Width(35f)) && _page < pageCount - 1) _page++;
+                GUILayout.EndHorizontal();
+            }
 
             GUILayout.Space(8f);
             DrawUrlSection();

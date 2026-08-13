@@ -12,7 +12,10 @@ namespace MidnightRadio
     /// </summary>
     internal sealed class Config
     {
-        public int Version { get; set; } = 2;
+        /// <summary>Bump when a stored config needs repairing; see <see cref="Migrate"/>.</summary>
+        public const int CurrentVersion = 3;
+
+        public int Version { get; set; } = CurrentVersion;
         public string Hotkey { get; set; } = "F4";
         public string Language { get; set; } = "auto";
         public List<string> MusicDirs { get; set; } = new List<string>();
@@ -136,6 +139,7 @@ namespace MidnightRadio
                 }
 
                 cfg.FillMissingSections();
+                cfg.Migrate();
                 cfg.Clamp();
                 return cfg;
             }
@@ -168,6 +172,37 @@ namespace MidnightRadio
             {
                 Log.Warn($"config save failed ({ex.Message})");
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Brings an older config forward. Defaults only apply to files that do not exist
+        /// yet, so a stored config keeps whatever was written when it was created - which
+        /// is how an early build's local-only settings survived into a version meant to be
+        /// synchronised. Version 3 repairs that.
+        /// </summary>
+        private void Migrate()
+        {
+            if (Version >= CurrentVersion) return;
+
+            int from = Version;
+            Version = CurrentVersion;
+
+            if (from < 3)
+            {
+                // Synced playback with an open queue is the point of the mod; an older file
+                // may carry it disabled. Safety comes from the runtime gate in
+                // SyncTransport.CanSend(), not from these flags.
+                Sync.Enabled = true;
+                Sync.AcceptFromOthers = true;
+                Sync.AnyoneCanQueue = true;
+                Sync.AnyoneCanSkip = true;
+
+                // A stored zero means the radio would be silent with no indication why.
+                if (Playback.Volume <= 0f) Playback.Volume = 0.15f;
+
+                Log.Info($"config migrated from version {from} to {CurrentVersion}: "
+                         + "synced playback re-enabled");
             }
         }
 

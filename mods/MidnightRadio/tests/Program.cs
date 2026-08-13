@@ -33,6 +33,7 @@ namespace MidnightRadio.SmokeTests
             Run("config save/load roundtrip", ConfigSaveLoadRoundtrip);
             Run("config fills missing sections", ConfigFillsMissingSections);
             Run("config missing/malformed fallback", ConfigFallbacks);
+            Run("config migrates legacy sync settings", ConfigMigratesLegacySync);
 
             Run("music library scans and deduplicates", MusicLibraryScansAndDeduplicates);
             Run("music library rebuilds malformed cache", MusicLibraryRebuildsMalformedCache);
@@ -397,7 +398,7 @@ namespace MidnightRadio.SmokeTests
                 CapturedLogs.Clear();
                 string missing = Path.Combine(root, "missing.json");
                 var absent = Config.Load(missing);
-                Equal(2, absent.Version, "missing-file defaults");
+                Equal(Config.CurrentVersion, absent.Version, "missing-file defaults");
                 True(
                     CapturedLogs.Any(message => message.Contains("no config", StringComparison.Ordinal)),
                     "missing-file log");
@@ -406,10 +407,57 @@ namespace MidnightRadio.SmokeTests
                 string malformed = Path.Combine(root, "broken.json");
                 File.WriteAllText(malformed, "{ this is not JSON");
                 var broken = Config.Load(malformed);
-                Equal(2, broken.Version, "malformed-file defaults");
+                Equal(Config.CurrentVersion, broken.Version, "malformed-file defaults");
                 True(
                     CapturedLogs.Any(message => message.Contains("config load failed", StringComparison.Ordinal)),
                     "malformed-file warning");
+            });
+        }
+
+        /// <summary>
+        /// A config written by an earlier build carries synced playback switched off and,
+        /// in at least one shipped case, a zero volume. Defaults never reach an existing
+        /// file, so loading has to repair it.
+        /// </summary>
+        private static void ConfigMigratesLegacySync()
+        {
+            InTempDirectory(root =>
+            {
+                CapturedLogs.Clear();
+                string path = Path.Combine(root, "legacy.json");
+                File.WriteAllText(path, """
+                {
+                  "version": 2,
+                  "playback": { "volume": 0 },
+                  "sync": {
+                    "enabled": false,
+                    "acceptFromOthers": false,
+                    "anyoneCanQueue": false,
+                    "anyoneCanSkip": false
+                  }
+                }
+                """);
+
+                var migrated = Config.Load(path);
+
+                Equal(Config.CurrentVersion, migrated.Version, "version bumped");
+                True(migrated.Sync.Enabled, "sync re-enabled");
+                True(migrated.Sync.AcceptFromOthers, "accepts others again");
+                True(migrated.Sync.AnyoneCanQueue, "open queue restored");
+                True(migrated.Sync.AnyoneCanSkip, "skip restored");
+                Near(0.15f, migrated.Playback.Volume, "silent volume repaired");
+                True(
+                    CapturedLogs.Any(m => m.Contains("config migrated", StringComparison.Ordinal)),
+                    "migration logged");
+
+                // A current file must pass through untouched - migration is not a reset.
+                CapturedLogs.Clear();
+                string current = Path.Combine(root, "current.json");
+                File.WriteAllText(current,
+                    $$"""{ "version": {{Config.CurrentVersion}}, "sync": { "enabled": false } }""");
+
+                var kept = Config.Load(current);
+                False(kept.Sync.Enabled, "deliberate opt-out preserved");
             });
         }
 
