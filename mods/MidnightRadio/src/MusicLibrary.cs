@@ -46,6 +46,19 @@ namespace MidnightRadio
         public long SizeBytes { get; }
         public DateTime LastWriteTimeUtc { get; }
 
+        /// <summary>
+        /// The same track pointing at a different file - used when playback needs a
+        /// converted copy. Id stays the content hash of the ORIGINAL, so peers still agree
+        /// on which track is playing even if one of them converted it and another did not.
+        /// </summary>
+        public TrackInfo WithPath(string path)
+        {
+            if (string.IsNullOrEmpty(path) || string.Equals(path, Path, StringComparison.OrdinalIgnoreCase))
+                return this;
+
+            return new TrackInfo(Id, Title, new[] { path }, SizeBytes, LastWriteTimeUtc);
+        }
+
         private static string[] CopyPaths(IList<string> paths)
         {
             var copy = new string[paths.Count];

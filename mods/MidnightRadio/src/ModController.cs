@@ -19,6 +19,7 @@ namespace MidnightRadio
         private readonly MusicLibrary _library;
         private readonly PlaybackController _player;
         private readonly YtDlpBridge _ytDlp;
+        private readonly AudioTranscoder _transcoder;
         private readonly RadioUI _ui;
         private readonly CancellationTokenSource _shutdown = new();
 
@@ -56,6 +57,8 @@ namespace MidnightRadio
             _player = new PlaybackController(_config);
             _player.TrackEnded += AutoNext;
             _ytDlp = new YtDlpBridge(_config, _dataDirectory);
+            _transcoder = new AudioTranscoder(
+                new ToolLocator(_config, _dataDirectory), _dataDirectory);
 
             // Synced playback rides on the game's own Fusion connection. With no session,
             // no receive path or no other modded peer, every one of these calls degrades to
@@ -184,9 +187,43 @@ namespace MidnightRadio
                 }
             }
 
-            // Goes through the session so every player hears it. Falls back to a direct
-            // local play when there is nobody to sync with.
-            _session.RequestPlay(track);
+            // Unity will not decode MP3 in a standalone build, and a music folder is mostly
+            // MP3 in practice. Convert first if needed, then play; the conversion is cached,
+            // so this is a no-op from the second play onwards.
+            if (AudioTranscoder.IsNativelyPlayable(track.Path))
+            {
+                // Goes through the session so every player hears it. Falls back to a direct
+                // local play when there is nobody to sync with.
+                _session.RequestPlay(track);
+                return;
+            }
+
+            _ui.SetStatus($"Bereite '{track.Title}' vor …");
+            var progress = new Progress<string>(message => Post(() => _ui.SetStatus(message)));
+
+            _transcoder.EnsurePlayableAsync(track, progress, _shutdown.Token)
+                .ContinueWith((Task<string> task) => Post(() =>
+                {
+                    if (task.IsCanceled || _disposed) return;
+
+                    if (task.IsFaulted)
+                    {
+                        _ui.SetStatus("Umwandlung fehlgeschlagen: "
+                                      + task.Exception?.GetBaseException().Message);
+                        return;
+                    }
+
+                    string playable = task.Result;
+                    if (string.IsNullOrEmpty(playable) || !File.Exists(playable))
+                    {
+                        _ui.SetStatus($"'{track.Title}' kann nicht abgespielt werden - "
+                                      + "ffmpeg fehlt oder die Datei ist beschädigt.");
+                        return;
+                    }
+
+                    _ui.SetStatus(string.Empty);
+                    _session.RequestPlay(track.WithPath(playable));
+                }));
         }
 
         private TrackInfo ResolveTrackById(string trackId)
