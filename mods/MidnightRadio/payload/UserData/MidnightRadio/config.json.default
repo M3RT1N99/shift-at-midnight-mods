@@ -1,0 +1,75 @@
+{
+  "version": 2,
+  "hotkey": "F4",
+  "language": "auto",
+  "musicDirs": [],
+
+  "playback": {
+    "volume": 0.15,
+    "volumeCeiling": 0.85,
+    "maxRangeMeters": 50,
+    "shuffle": false,
+    "repeat": "all",
+    "duckWhileTransmittingDb": -12,
+    "maxTrackMinutes": 10
+  },
+
+  "sync": {
+    "enabled": false,
+    "protocolVersion": 1,
+
+    "acceptFromOthers": false,
+    "anyoneCanQueue": false,
+    "anyoneCanSkip": false,
+    "requireVoteToSkip": false,
+
+    "startLeadMs": 1500,
+    "prefetchLeadSeconds": 20,
+    "resyncIntervalSeconds": 15,
+
+    "softCorrectAboveMs": 120,
+    "softCorrectPitchRange": 0.02,
+    "hardSeekAboveMs": 750,
+
+    "onMissingTrack": "silent",
+    "onHuntMusic": "duck",
+
+    "blockedPlayers": [],
+
+    "peerToPeerTransfer": {
+      "enabled": false,
+      "consentAcceptedVersion": 0,
+      "acceptedAt": null,
+      "maxFileMB": 25,
+      "maxRateKBps": 96,
+      "onlyOutsideHunt": true
+    }
+  },
+
+  "urlMode": {
+    "enabled": false,
+    "noticeAcceptedVersion": 0,
+    "acceptedAt": null,
+    "audioFormat": "vorbis",
+    "audioQuality": 0,
+    "allowPlaylists": false,
+    "maxDurationMinutes": 15,
+    "resolveTimeoutSeconds": 120
+  },
+
+  "tools": {
+    "ytDlpPath": null,
+    "ffmpegPath": null
+  },
+
+  "cache": {
+    "maxCacheMB": 2048,
+    "evictionEnabled": true
+  },
+
+  "logging": {
+    "level": "info",
+    "keepDays": 7,
+    "syncDiagnostics": false
+  }
+}

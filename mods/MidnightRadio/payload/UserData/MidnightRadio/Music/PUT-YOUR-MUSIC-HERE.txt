@@ -1,0 +1,18 @@
+Drop your own audio files into this folder.
+
+Recommended: .ogg or .wav
+Also attempted: .mp3 and .aiff/.aif (codec availability can vary by game build)
+
+ffmpeg is used by the optional URL downloader. It does not add local-file
+formats to Unity's audio decoder.
+
+Subfolders are scanned too, so you can organise by album or mood.
+Then open the radio panel in game (default key: F4) and hit "Reload".
+
+-- CURRENT DEVELOPMENT BUILD ---------------------------------------------
+
+Playback is local-only. Lobby synchronisation, a shared queue and direct
+audio transfer are not active yet. Nothing in this folder, including content
+hashes or URLs, is sent to other players.
+
+This mod ships no music of its own.

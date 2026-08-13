@@ -1,0 +1,5 @@
+No third-party code, game assets, audio, or external executables are
+redistributed with this mod.
+
+yt-dlp and ffmpeg are optional external tools. If you enable URL downloads,
+you install them yourself; MidnightRadio never downloads or updates them.

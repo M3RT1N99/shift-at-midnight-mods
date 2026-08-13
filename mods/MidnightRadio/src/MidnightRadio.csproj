@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>MidnightRadio</AssemblyName>
+    <RootNamespace>MidnightRadio</RootNamespace>
+    <Version>1.0.0</Version>
+    <Authors>Marti</Authors>
+    <Product>Midnight Radio</Product>
+
+    <!-- MelonLoader loads the DLL itself; never emit a host/deps graph. -->
+    <EnableDynamicLoading>false</EnableDynamicLoading>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DebugType Condition="'$(Configuration)' == 'Debug'">portable</DebugType>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+
+    <!-- Interop assemblies are unsigned + reference-only; silence the noise they cause. -->
+    <NoWarn>$(NoWarn);CS0436;CS0618;NU1701</NoWarn>
+    <AssemblySearchPaths>$(AssemblySearchPaths);{RawFileName}</AssemblySearchPaths>
+  </PropertyGroup>
+
+  <!-- GameDir is supplied by scripts\build.ps1 (-p:GameDir=...). -->
+  <PropertyGroup>
+    <MlDir>$(GameDir)\MelonLoader</MlDir>
+    <MlNet6>$(MlDir)\net6</MlNet6>
+    <MlInterop>$(MlDir)\Il2CppAssemblies</MlInterop>
+  </PropertyGroup>
+
+  <Target Name="VerifyGameDir" BeforeTargets="BeforeResolveReferences">
+    <Error Condition="'$(GameDir)' == ''"
+           Text="GameDir is not set. Build via scripts\build.ps1, or pass -p:GameDir=&quot;D:\path\to\Shift At Midnight&quot;." />
+    <Error Condition="!Exists('$(MlNet6)\MelonLoader.dll')"
+           Text="MelonLoader not found at $(MlNet6). Install MelonLoader x64 into the game first." />
+    <Error Condition="!Exists('$(MlInterop)\Il2Cppmscorlib.dll')"
+           Text="Il2Cpp interop assemblies not found at $(MlInterop). Launch the game once with MelonLoader so it can generate them." />
+  </Target>
+
+  <ItemGroup>
+    <!-- Loader + interop runtime -->
+    <Reference Include="MelonLoader"            HintPath="$(MlNet6)\MelonLoader.dll"            Private="false" />
+    <Reference Include="0Harmony"               HintPath="$(MlNet6)\0Harmony.dll"               Private="false" />
+    <Reference Include="Il2CppInterop.Runtime"  HintPath="$(MlNet6)\Il2CppInterop.Runtime.dll"  Private="false" />
+    <Reference Include="Il2CppInterop.Common"   HintPath="$(MlNet6)\Il2CppInterop.Common.dll"   Private="false" />
+
+    <!-- Generated interop assemblies -->
+    <Reference Include="Il2Cppmscorlib" HintPath="$(MlInterop)\Il2Cppmscorlib.dll" Private="false" />
+    <Reference Include="UnityEngine.CoreModule"      HintPath="$(MlInterop)\UnityEngine.CoreModule.dll"      Private="false" />
+    <Reference Include="UnityEngine.AudioModule"     HintPath="$(MlInterop)\UnityEngine.AudioModule.dll"     Private="false" />
+    <Reference Include="UnityEngine.IMGUIModule"     HintPath="$(MlInterop)\UnityEngine.IMGUIModule.dll"     Private="false" />
+    <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(MlInterop)\UnityEngine.InputLegacyModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UnityWebRequestModule" HintPath="$(MlInterop)\UnityEngine.UnityWebRequestModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UnityWebRequestAudioModule" HintPath="$(MlInterop)\UnityEngine.UnityWebRequestAudioModule.dll" Private="false" />
+    <Reference Include="UnityEngine.UI"              HintPath="$(MlInterop)\UnityEngine.UI.dll"              Private="false" />
+    <Reference Include="UnityEngine.UIModule"        HintPath="$(MlInterop)\UnityEngine.UIModule.dll"        Private="false" />
+    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(MlInterop)\UnityEngine.TextRenderingModule.dll" Private="false" />
+    <Reference Include="Unity.TextMeshPro"           HintPath="$(MlInterop)\Unity.TextMeshPro.dll"           Private="false" />
+    <Reference Include="Unity.InputSystem"           HintPath="$(MlInterop)\Unity.InputSystem.dll"           Private="false" />
+    <Reference Include="Assembly-CSharp"             HintPath="$(MlInterop)\Assembly-CSharp.dll"             Private="false" />
+
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,60 @@
+# --- Game install ------------------------------------------------------------
+# "Shift At Midnight/" is a symlink mirror of the Steam installation. It contains
+# the game's own binaries and assets. Never commit it.
+/Shift At Midnight/
+
+# Decrypted game text databases are derived from the game's copyrighted content.
+# Keep them local; the tool regenerates them from the install at any time.
+/text_src/
+/text_out/
+*.decrypted.json
+
+# --- Build output ------------------------------------------------------------
+**/bin/
+**/obj/
+**/build/
+*.dll
+*.pdb
+*.user
+*.suo
+*.sln.docstates
+
+# --- Packaged mods -----------------------------------------------------------
+# Built by scripts/pack.ps1 from sources that are tracked.
+/dist/
+
+# --- Mod user data -----------------------------------------------------------
+# Music, download cache and per-user config never belong in the repo.
+**/UserData/**/Music/*
+!**/UserData/**/Music/PUT-YOUR-MUSIC-HERE.txt
+**/UserData/**/Cache/
+**/UserData/**/Logs/
+**/UserData/**/Tools/
+**/UserData/**/config.json
+**/UserData/**/library.json
+
+# --- Third-party binaries ----------------------------------------------------
+# yt-dlp and ffmpeg are installed by the user, never redistributed by us.
+yt-dlp.exe
+ffmpeg.exe
+ffprobe.exe
+*.bundle
+
+# --- Reverse-engineering tooling ---------------------------------------------
+# Stays local. sam_textdb.py embeds the game's own text-database key; the asset
+# dumpers are only useful against a local install. Neither is part of what gets
+# distributed to other players.
+/_tools/
+/tools/sam_textdb.py
+
+# --- Python tooling ----------------------------------------------------------
+__pycache__/
+*.pyc
+*.pkl
+
+# --- Editor / OS -------------------------------------------------------------
+.vs/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>MidnightRadio.SmokeTests</RootNamespace>
+    <RestoreIgnoreFailedSources>true</RestoreIgnoreFailedSources>
+    <RestoreConfigFile>$(MSBuildThisFileDirectory)NuGet.Config</RestoreConfigFile>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile the real Unity-independent sources so these tests cannot drift to copies. -->
+    <Compile Include="Program.cs" />
+    <Compile Include="..\src\Config.cs" Link="Production\Config.cs" />
+    <Compile Include="..\src\Log.cs" Link="Production\Log.cs" />
+    <Compile Include="..\src\MusicLibrary.cs" Link="Production\MusicLibrary.cs" />
+    <Compile Include="..\src\ExternalTools.cs" Link="Production\ExternalTools.cs" />
+    <Compile Include="..\src\Sync\SyncProtocol.cs" Link="Production\SyncProtocol.cs" />
+  </ItemGroup>
+
+</Project>
