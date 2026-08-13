@@ -1,10 +1,15 @@
-// sam-mod-gui - a double-clickable front end for the installer.
+// sam-mod-gui - the double-clickable front end.
 //
-// Plain Win32, no toolkit. The CLI already links only against Windows libraries, and a
-// GUI that pulled in a framework would defeat the point of handing someone a single .exe.
+// Layout follows the same shape as the 7DTD Mod Updater in this author's other project:
+// a game-folder box with a live validity indicator, an installed-vs-latest line, one
+// prominent "update and play" button with two narrower alternatives, and a log.
 //
-// All the real work lives in the same headers the CLI uses; this file is only presentation
-// and threading. Long operations run on a worker thread and report back through
+// Plain Win32 rather than WinForms on purpose. The CLI already links only against Windows
+// libraries, so this stays a ~500 KB self-contained binary: no .NET runtime to install and
+// nothing to explain to whoever receives it.
+//
+// All the real work lives in the same headers the CLI uses; this file is presentation and
+// threading only. Long operations run on a worker thread and report back through
 // PostMessage, so the window never freezes and the worker never touches a control directly.
 
 #ifndef UNICODE
@@ -14,15 +19,16 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <shlobj.h>
+#include <tlhelp32.h>
 
 #include <atomic>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
+#include <thread>
 
 #include "github.hpp"
 #include "install.hpp"
@@ -35,16 +41,19 @@ using namespace sam;
 namespace {
 
 constexpr const wchar_t* kWindowClass = L"SamModGuiWindow";
-constexpr const wchar_t* kTitle = L"Shift At Midnight - Mod Manager";
-constexpr const char* kDefaultOwner = "M3RT1N99";
-constexpr const char* kDefaultRepo = "shift-at-midnight-mods";
+constexpr const wchar_t* kTitle = L"Shift At Midnight - Mod Updater";
+constexpr const wchar_t* kGameExe = L"ShiftAtMidnight.exe";
+constexpr const char* kOwner = "M3RT1N99";
+constexpr const char* kRepo = "shift-at-midnight-mods";
 
 enum : int {
-    IdList = 1001, IdUpdate, IdInstall, IdUninstall, IdVerify, IdBrowse, IdStatus, IdGameDir
+    IdPath = 1001, IdBrowse, IdUpdatePlay, IdUpdateOnly, IdPlayOnly, IdLog, IdStatus, IdVersions
 };
 enum : UINT {
-    WmLog = WM_APP + 1,   // wParam unused, lParam = new std::wstring*
-    WmDone = WM_APP + 2,  // worker finished; refresh and re-enable
+    WmLog = WM_APP + 1,      // lParam = new std::wstring*
+    WmVersions = WM_APP + 2, // lParam = new std::wstring*
+    WmDone = WM_APP + 3,
+    WmPlay = WM_APP + 4,     // worker asks the UI thread to launch the game
 };
 
 std::wstring widen(const std::string& s) {
@@ -56,313 +65,371 @@ std::wstring widen(const std::string& s) {
 }
 
 struct App {
-    HWND window = nullptr, list = nullptr, status = nullptr, gameLabel = nullptr;
-    HWND update = nullptr, install = nullptr, uninstall = nullptr, verify = nullptr, browse = nullptr;
-    HFONT font = nullptr;
+    HWND window{}, pathBox{}, browse{}, status{}, versions{}, log{};
+    HWND updatePlay{}, updateOnly{}, playOnly{};
+    HFONT font{}, bigFont{}, monoFont{};
 
     fs::path gameDir;
-    std::unique_ptr<Installer> installer;
-    std::vector<Receipt> mods;
     std::atomic<bool> busy{false};
+    bool playAfterUpdate = false;
 };
 
 App g;
 
-// ---------------------------------------------------------------- reporting
+// ---------------------------------------------------------------- config
+
+// Remembered next to the executable so a copied .exe carries its own settings.
+fs::path ConfigPath() {
+    wchar_t buffer[MAX_PATH]{};
+    GetModuleFileNameW(nullptr, buffer, MAX_PATH);
+    return fs::path(buffer).parent_path() / "sam-mod-gui.txt";
+}
+
+std::wstring LoadSavedPath() {
+    std::wifstream in(ConfigPath());
+    std::wstring line;
+    if (in && std::getline(in, line)) return line;
+    return {};
+}
+
+void SaveePath(const std::wstring& value) {
+    std::wofstream out(ConfigPath(), std::ios::trunc);
+    if (out) out << value << L"\n";
+}
+
+// ---------------------------------------------------------------- helpers
 
 void Log(const std::wstring& line) {
     PostMessageW(g.window, WmLog, 0, (LPARAM) new std::wstring(line));
 }
 void Log(const std::string& line) { Log(widen(line)); }
 
-void SetButtonsEnabled(bool enabled) {
-    const BOOL flag = enabled ? TRUE : FALSE;
-    for (HWND h : {g.update, g.install, g.uninstall, g.verify, g.browse})
-        if (h) EnableWindow(h, flag);
+std::wstring PathBoxText() {
+    const int length = GetWindowTextLengthW(g.pathBox);
+    std::wstring text((size_t)length, L'\0');
+    GetWindowTextW(g.pathBox, text.data(), length + 1);
+    return text;
 }
 
-// ---------------------------------------------------------------- game directory
+bool IsValidGameDir(const std::wstring& dir) {
+    if (dir.empty()) return false;
+    std::error_code ignored;
+    return fs::exists(fs::path(dir) / kGameExe, ignored);
+}
+
+bool IsGameRunning() {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    bool found = false;
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (_wcsicmp(entry.szExeFile, kGameExe) == 0) { found = true; break; }
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return found;
+}
 
 fs::path DetectGameDir() {
     for (const wchar_t* root : {L"C:", L"D:", L"E:", L"F:"}) {
         for (const wchar_t* tail : {
-                 L"/Program Files (x86)/Steam/steamapps/common/Shift At Midnight",
-                 L"/Steam/steamapps/common/Shift At Midnight",
-                 L"/Games/Steam Games/steamapps/common/Shift At Midnight",
-                 L"/SteamLibrary/steamapps/common/Shift At Midnight"}) {
-            fs::path candidate = fs::path(root) / fs::path(tail).relative_path();
-            if (fs::exists(candidate / "ShiftAtMidnight.exe")) return candidate;
+                 L"Program Files (x86)/Steam/steamapps/common/Shift At Midnight",
+                 L"Steam/steamapps/common/Shift At Midnight",
+                 L"Games/Steam Games/steamapps/common/Shift At Midnight",
+                 L"SteamLibrary/steamapps/common/Shift At Midnight"}) {
+            fs::path candidate = fs::path(std::wstring(root) + L"\\") / tail;
+            std::error_code ignored;
+            if (fs::exists(candidate / kGameExe, ignored)) return candidate;
         }
     }
     return {};
 }
 
-bool AdoptGameDir(const fs::path& dir) {
+// ---------------------------------------------------------------- state display
+
+void RefreshValidity() {
+    const std::wstring dir = PathBoxText();
+    const bool ok = IsValidGameDir(dir);
+
+    SetWindowTextW(g.status, ok ? L"Spielordner in Ordnung  ✓"
+                                : L"ShiftAtMidnight.exe nicht in diesem Ordner  ✗");
+    InvalidateRect(g.status, nullptr, TRUE);
+
+    g.gameDir = ok ? fs::path(dir) : fs::path{};
+    EnableWindow(g.playOnly, ok && !g.busy);
+}
+
+void ShowVersions(const std::wstring& latest) {
+    std::wstring installed = L"(keiner)";
     try {
-        g.installer = std::make_unique<Installer>(dir);
-        g.gameDir = dir;
-        SetWindowTextW(g.gameLabel, (L"Spiel:  " + dir.wstring()).c_str());
-        return true;
-    } catch (const std::exception& ex) {
-        g.installer.reset();
-        SetWindowTextW(g.gameLabel, L"Spiel:  nicht gefunden");
-        Log(std::string("Spielordner nicht nutzbar: ") + ex.what());
-        return false;
-    }
-}
+        if (!g.gameDir.empty()) {
+            Installer installer(g.gameDir);
+            const auto mods = installer.installed();
+            if (!mods.empty()) {
+                installed.clear();
+                for (size_t i = 0; i < mods.size(); ++i) {
+                    if (i) installed += L", ";
+                    installed += widen(mods[i].name) + L" " + widen(mods[i].version);
+                }
+            }
+        }
+    } catch (...) { /* an unreadable install simply shows "(keiner)" */ }
 
-fs::path PickFolder(HWND owner) {
-    BROWSEINFOW info{};
-    info.hwndOwner = owner;
-    info.lpszTitle = L"Installationsordner von Shift At Midnight wählen";
-    info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
-
-    LPITEMIDLIST picked = SHBrowseForFolderW(&info);
-    if (!picked) return {};
-
-    wchar_t buffer[MAX_PATH] = {};
-    const bool ok = SHGetPathFromIDListW(picked, buffer);
-    CoTaskMemFree(picked);
-    return ok ? fs::path(buffer) : fs::path{};
-}
-
-fs::path PickPackage(HWND owner) {
-    wchar_t buffer[MAX_PATH] = {};
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = owner;
-    dialog.lpstrFilter = L"Mod-Paket (*.modpkg)\0*.modpkg\0Alle Dateien\0*.*\0";
-    dialog.lpstrFile = buffer;
-    dialog.nMaxFile = MAX_PATH;
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    return GetOpenFileNameW(&dialog) ? fs::path(buffer) : fs::path{};
-}
-
-// ---------------------------------------------------------------- list
-
-void RefreshList() {
-    SendMessageW(g.list, LB_RESETCONTENT, 0, 0);
-    g.mods.clear();
-    if (!g.installer) return;
-
-    g.mods = g.installer->installed();
-    if (g.mods.empty()) {
-        SendMessageW(g.list, LB_ADDSTRING, 0, (LPARAM)L"(keine Mods installiert)");
-        return;
-    }
-    for (const auto& mod : g.mods) {
-        const std::wstring line = widen(mod.name) + L"   " + widen(mod.version);
-        SendMessageW(g.list, LB_ADDSTRING, 0, (LPARAM)line.c_str());
-    }
-}
-
-// The placeholder row is not a mod, so selection only counts when mods exist.
-const Receipt* SelectedMod() {
-    if (g.mods.empty()) return nullptr;
-    const LRESULT index = SendMessageW(g.list, LB_GETCURSEL, 0, 0);
-    if (index == LB_ERR || index < 0 || (size_t)index >= g.mods.size()) return nullptr;
-    return &g.mods[(size_t)index];
+    const std::wstring line = L"Installiert: " + installed +
+                              L"     |     Neuestes Release: " + latest;
+    PostMessageW(g.window, WmVersions, 0, (LPARAM) new std::wstring(line));
 }
 
 // ---------------------------------------------------------------- work
 
-// Runs `job` off the UI thread. Buttons stay disabled until it reports back.
 void RunAsync(std::function<void()> job) {
     if (g.busy.exchange(true)) return;
-    SetButtonsEnabled(false);
+    for (HWND h : {g.updatePlay, g.updateOnly, g.playOnly, g.browse}) EnableWindow(h, FALSE);
 
     std::thread([job = std::move(job)] {
-        try {
-            job();
-        } catch (const std::exception& ex) {
-            Log(std::string("Fehler: ") + ex.what());
-        } catch (...) {
-            Log(std::wstring(L"Unbekannter Fehler."));
-        }
+        try { job(); }
+        catch (const std::exception& ex) { Log(std::string("Fehler: ") + ex.what()); }
+        catch (...) { Log(std::wstring(L"Unbekannter Fehler.")); }
         PostMessageW(g.window, WmDone, 0, 0);
     }).detach();
 }
 
-void DoUpdate() {
-    RunAsync([] {
-        Log(L"Suche nach Aktualisierungen …");
-        GitHubSource source(kDefaultOwner, kDefaultRepo, "");
+void LaunchGame() {
+    if (g.gameDir.empty()) return;
+    const fs::path exe = g.gameDir / kGameExe;
 
+    SHELLEXECUTEINFOW info{};
+    info.cbSize = sizeof(info);
+    info.lpVerb = L"open";
+    info.lpFile = exe.c_str();
+    info.lpDirectory = g.gameDir.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    info.fMask = SEE_MASK_NOASYNC;
+
+    if (ShellExecuteExW(&info)) Log(L"Spiel gestartet.");
+    else Log(L"Spiel konnte nicht gestartet werden.");
+}
+
+void DoUpdate(bool thenPlay) {
+    const fs::path dir = g.gameDir;
+    g.playAfterUpdate = thenPlay;
+
+    RunAsync([dir, thenPlay] {
+        Installer installer(dir);
+
+        Log(L"Suche nach Aktualisierungen …");
+        GitHubSource source(kOwner, kRepo, "");
         const auto assets = source.latest();
+
         if (assets.empty()) {
             Log(L"Das neueste Release enthält keine Mod-Pakete.");
-            return;
+        } else {
+            int changed = 0;
+            for (const auto& asset : assets) {
+                const auto current = installer.receiptFor(asset.modSlug);
+                if (current && current->version == asset.version) {
+                    Log(asset.modSlug + " " + current->version + " ist aktuell.");
+                    continue;
+                }
+
+                Log(asset.modSlug + ": " +
+                    (current ? current->version + " -> " : std::string("neu ")) +
+                    asset.version + " wird geladen …");
+
+                const auto bytes = source.download(asset);
+                const fs::path staged = fs::temp_directory_path() / asset.fileName;
+                {
+                    std::ofstream out(staged, std::ios::binary | std::ios::trunc);
+                    out.write(reinterpret_cast<const char*>(bytes.data()),
+                              (std::streamsize)bytes.size());
+                }
+
+                try {
+                    const Receipt receipt = installer.install(staged, true);
+                    Log(receipt.name + " " + receipt.version + " installiert.");
+                    ++changed;
+                } catch (const std::exception& ex) {
+                    Log(asset.modSlug + " fehlgeschlagen: " + ex.what());
+                }
+                std::error_code ignored;
+                fs::remove(staged, ignored);
+            }
+            if (changed == 0) Log(L"Alles auf dem neuesten Stand.");
         }
 
-        int changed = 0;
-        for (const auto& asset : assets) {
-            const auto current = g.installer->receiptFor(asset.modSlug);
-            if (current && current->version == asset.version) {
-                Log(asset.modSlug + " " + current->version + " ist aktuell.");
-                continue;
-            }
+        ShowVersions(assets.empty() ? L"—" : widen(assets.front().version));
 
-            Log(asset.modSlug + ": " + (current ? current->version + " -> " : std::string("neu "))
-                + asset.version + " wird geladen …");
-
-            const auto bytes = source.download(asset);
-            const fs::path staged = fs::temp_directory_path() / asset.fileName;
-            {
-                std::ofstream out(staged, std::ios::binary | std::ios::trunc);
-                out.write(reinterpret_cast<const char*>(bytes.data()),
-                          (std::streamsize)bytes.size());
-            }
-
-            try {
-                const Receipt receipt = g.installer->install(staged, true);
-                Log(receipt.name + " " + receipt.version + " installiert.");
-                ++changed;
-            } catch (const std::exception& ex) {
-                Log(asset.modSlug + " fehlgeschlagen: " + ex.what());
-            }
-            std::error_code ignored;
-            fs::remove(staged, ignored);
-        }
-        if (changed == 0) Log(L"Alles auf dem neuesten Stand.");
-    });
-}
-
-void DoInstallFile(const fs::path& package) {
-    RunAsync([package] {
-        Log(L"Installiere " + package.filename().wstring() + L" …");
-        const Receipt receipt = g.installer->install(package, true);
-        Log(receipt.name + " " + receipt.version + " installiert ("
-            + std::to_string(receipt.files.size()) + " Dateien).");
-    });
-}
-
-void DoUninstall(const std::string& slug, const std::string& name) {
-    RunAsync([slug, name] {
-        g.installer->uninstall(slug);
-        Log(name + " entfernt. Eigene Musik und Einstellungen bleiben erhalten.");
-    });
-}
-
-void DoVerify() {
-    RunAsync([] {
-        const auto mods = g.installer->installed();
-        if (mods.empty()) { Log(L"Nichts zu prüfen."); return; }
-
-        bool clean = true;
-        for (const auto& mod : mods) {
-            const auto result = g.installer->verify(mod.slug);
-            if (result.clean()) { Log(mod.name + ": in Ordnung."); continue; }
-            clean = false;
-            for (const auto& f : result.missing)  Log("  fehlt:     " + f);
-            for (const auto& f : result.modified) Log("  verändert: " + f);
-        }
-        if (!clean)
-            Log(L"Veränderte Dateien deuten meist auf ein Spiel-Update hin - "
-                L"einfach neu installieren.");
+        // Launching must happen on the UI thread, not from the worker.
+        if (thenPlay) PostMessageW(g.window, WmPlay, 0, 0);
     });
 }
 
 // ---------------------------------------------------------------- window
 
-void CreateControls(HWND parent) {
-    auto make = [&](const wchar_t* cls, const wchar_t* text, DWORD style,
-                    int x, int y, int w, int h, int id) {
-        HWND control = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
-                                       x, y, w, h, parent, (HMENU)(INT_PTR)id,
-                                       GetModuleHandleW(nullptr), nullptr);
-        SendMessageW(control, WM_SETFONT, (WPARAM)g.font, TRUE);
-        return control;
-    };
-
-    g.gameLabel = make(L"STATIC", L"Spiel:  wird gesucht …", 0, 12, 10, 560, 20, IdGameDir);
-    g.browse    = make(L"BUTTON", L"Ordner wählen …", BS_PUSHBUTTON, 452, 34, 120, 26, IdBrowse);
-
-    make(L"STATIC", L"Installierte Mods", 0, 12, 40, 200, 18, 0);
-    g.list = make(L"LISTBOX", nullptr, WS_BORDER | WS_VSCROLL | LBS_NOTIFY,
-                  12, 62, 430, 120, IdList);
-
-    g.update    = make(L"BUTTON", L"Aktualisieren",  BS_PUSHBUTTON, 452, 62,  120, 30, IdUpdate);
-    g.install   = make(L"BUTTON", L"Aus Datei …",    BS_PUSHBUTTON, 452, 96,  120, 30, IdInstall);
-    g.uninstall = make(L"BUTTON", L"Entfernen",      BS_PUSHBUTTON, 452, 130, 120, 26, IdUninstall);
-    g.verify    = make(L"BUTTON", L"Prüfen",         BS_PUSHBUTTON, 452, 160, 120, 26, IdVerify);
-
-    g.status = make(L"EDIT", nullptr,
-                    WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-                    12, 194, 560, 150, IdStatus);
+HWND Make(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style,
+          int x, int y, int w, int h, int id, HFONT font) {
+    HWND control = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
+                                   x, y, w, h, parent, (HMENU)(INT_PTR)id,
+                                   GetModuleHandleW(nullptr), nullptr);
+    SendMessageW(control, WM_SETFONT, (WPARAM)font, TRUE);
+    return control;
 }
 
-void AppendStatus(const std::wstring& line) {
-    const int length = GetWindowTextLengthW(g.status);
-    SendMessageW(g.status, EM_SETSEL, length, length);
-    const std::wstring text = line + L"\r\n";
-    SendMessageW(g.status, EM_REPLACESEL, FALSE, (LPARAM)text.c_str());
+void BuildUi(HWND parent) {
+    g.font = CreateFontW(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+                         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                         DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    g.bigFont = CreateFontW(-16, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
+                            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    g.monoFont = CreateFontW(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                             FIXED_PITCH | FF_MODERN, L"Consolas");
+
+    Make(parent, L"STATIC", L"Spielordner:", 0, 12, 16, 84, 20, 0, g.font);
+
+    g.pathBox = Make(parent, L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL,
+                     98, 13, 468, 24, IdPath, g.font);
+    g.browse = Make(parent, L"BUTTON", L"Durchsuchen …", BS_PUSHBUTTON,
+                    572, 12, 116, 26, IdBrowse, g.font);
+
+    g.status = Make(parent, L"STATIC", L"", 0, 98, 42, 590, 20, IdStatus, g.font);
+    g.versions = Make(parent, L"STATIC", L"Installiert: —     |     Neuestes Release: —",
+                      0, 12, 66, 676, 20, IdVersions, g.font);
+
+    g.updatePlay = Make(parent, L"BUTTON", L"Mods aktualisieren && Spiel starten",
+                        BS_PUSHBUTTON, 12, 92, 340, 48, IdUpdatePlay, g.bigFont);
+    g.updateOnly = Make(parent, L"BUTTON", L"Nur aktualisieren", BS_PUSHBUTTON,
+                        360, 92, 160, 48, IdUpdateOnly, g.font);
+    g.playOnly = Make(parent, L"BUTTON", L"Spiel starten", BS_PUSHBUTTON,
+                      528, 92, 160, 48, IdPlayOnly, g.font);
+
+    g.log = Make(parent, L"EDIT", L"",
+                 WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+                 12, 152, 676, 328, IdLog, g.monoFont);
+}
+
+void AppendLog(const std::wstring& line) {
+    const int length = GetWindowTextLengthW(g.log);
+    SendMessageW(g.log, EM_SETSEL, length, length);
+    SendMessageW(g.log, EM_REPLACESEL, FALSE, (LPARAM)(line + L"\r\n").c_str());
 }
 
 LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
         case WM_CREATE:
             g.window = window;
-            g.font = CreateFontW(-12, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
-                                 OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                                 DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-            CreateControls(window);
+            BuildUi(window);
             return 0;
+
+        // Green when the folder is valid, red when it is not - the same at-a-glance cue
+        // the 7DTD updater uses.
+        case WM_CTLCOLORSTATIC:
+            if ((HWND)lParam == g.status) {
+                const bool ok = IsValidGameDir(PathBoxText());
+                SetTextColor((HDC)wParam, ok ? RGB(0x2E, 0x7D, 0x32) : RGB(0xC6, 0x28, 0x28));
+                SetBkMode((HDC)wParam, TRANSPARENT);
+                return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+            }
+            if ((HWND)lParam == g.versions) {
+                SetTextColor((HDC)wParam, RGB(0x60, 0x60, 0x60));
+                SetBkMode((HDC)wParam, TRANSPARENT);
+                return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+            }
+            return DefWindowProcW(window, message, wParam, lParam);
 
         case WmLog: {
             std::unique_ptr<std::wstring> line((std::wstring*)lParam);
-            AppendStatus(*line);
+            AppendLog(*line);
             return 0;
         }
 
+        case WmVersions: {
+            std::unique_ptr<std::wstring> line((std::wstring*)lParam);
+            SetWindowTextW(g.versions, line->c_str());
+            InvalidateRect(g.versions, nullptr, TRUE);
+            return 0;
+        }
+
+        case WmPlay:
+            LaunchGame();
+            return 0;
+
         case WmDone:
             g.busy = false;
-            SetButtonsEnabled(true);
-            RefreshList();
+            for (HWND h : {g.updatePlay, g.updateOnly, g.browse}) EnableWindow(h, TRUE);
+            RefreshValidity();
             return 0;
 
         case WM_COMMAND: {
-            if (g.busy && LOWORD(wParam) != IdList) return 0;
+            const int id = LOWORD(wParam);
 
-            switch (LOWORD(wParam)) {
+            if (id == IdPath && HIWORD(wParam) == EN_CHANGE) { RefreshValidity(); return 0; }
+            if (g.busy) return 0;
+
+            switch (id) {
                 case IdBrowse: {
-                    const fs::path picked = PickFolder(window);
-                    if (!picked.empty() && AdoptGameDir(picked)) RefreshList();
-                    return 0;
-                }
-                case IdUpdate:
-                    if (g.installer) DoUpdate();
-                    else AppendStatus(L"Erst den Spielordner wählen.");
-                    return 0;
-                case IdInstall: {
-                    if (!g.installer) { AppendStatus(L"Erst den Spielordner wählen."); return 0; }
-                    const fs::path package = PickPackage(window);
-                    if (!package.empty()) DoInstallFile(package);
-                    return 0;
-                }
-                case IdUninstall: {
-                    const Receipt* selected = SelectedMod();
-                    if (!selected) { AppendStatus(L"Bitte zuerst einen Mod auswählen."); return 0; }
+                    BROWSEINFOW info{};
+                    info.hwndOwner = window;
+                    info.lpszTitle = L"Installationsordner von Shift At Midnight wählen";
+                    info.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
 
-                    const std::wstring question =
-                        L"„" + widen(selected->name) + L"“ entfernen?\r\n\r\n"
-                        L"Die Originaldateien des Spiels werden wiederhergestellt. "
-                        L"Deine Musik und Einstellungen bleiben erhalten.";
-                    if (MessageBoxW(window, question.c_str(), kTitle,
-                                    MB_YESNO | MB_ICONQUESTION) == IDYES)
-                        DoUninstall(selected->slug, selected->name);
+                    LPITEMIDLIST picked = SHBrowseForFolderW(&info);
+                    if (!picked) return 0;
+
+                    wchar_t buffer[MAX_PATH]{};
+                    const bool ok = SHGetPathFromIDListW(picked, buffer);
+                    CoTaskMemFree(picked);
+                    if (ok) { SetWindowTextW(g.pathBox, buffer); SaveePath(buffer); }
                     return 0;
                 }
-                case IdVerify:
-                    if (g.installer) DoVerify();
+
+                case IdUpdatePlay:
+                case IdUpdateOnly: {
+                    if (g.gameDir.empty()) {
+                        MessageBoxW(window,
+                                    L"Der Spielordner stimmt nicht - ShiftAtMidnight.exe wurde "
+                                    L"dort nicht gefunden.\n\nWähle den Ordner über "
+                                    L"„Durchsuchen“.",
+                                    kTitle, MB_OK | MB_ICONWARNING);
+                        return 0;
+                    }
+
+                    // Mod DLLs are locked while the game runs, so replacing them would fail
+                    // halfway. Better to say so than to roll back a doomed install.
+                    if (IsGameRunning()) {
+                        const int answer = MessageBoxW(
+                            window,
+                            L"Shift At Midnight läuft gerade. Die Mod-Dateien sind dann "
+                            L"gesperrt und können nicht ersetzt werden.\n\n"
+                            L"Schließe das Spiel und klicke dann OK.",
+                            kTitle, MB_OKCANCEL | MB_ICONWARNING);
+                        if (answer != IDOK) { AppendLog(L"Abgebrochen (Spiel läuft)."); return 0; }
+                        if (IsGameRunning()) {
+                            AppendLog(L"Spiel läuft weiterhin - abgebrochen.");
+                            return 0;
+                        }
+                    }
+
+                    SaveePath(PathBoxText());
+                    DoUpdate(id == IdUpdatePlay);
+                    return 0;
+                }
+
+                case IdPlayOnly:
+                    LaunchGame();
                     return 0;
             }
             return 0;
         }
 
         case WM_CLOSE:
-            // A half-finished install must not be abandoned mid-transaction.
             if (g.busy) {
-                if (MessageBoxW(window, L"Es läuft noch eine Installation. Trotzdem beenden?",
+                if (MessageBoxW(window,
+                                L"Es läuft noch eine Installation. Trotzdem beenden?",
                                 kTitle, MB_YESNO | MB_ICONWARNING) != IDYES)
                     return 0;
             }
@@ -370,7 +437,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
             return 0;
 
         case WM_DESTROY:
-            if (g.font) DeleteObject(g.font);
+            for (HFONT f : {g.font, g.bigFont, g.monoFont}) if (f) DeleteObject(f);
             PostQuitMessage(0);
             return 0;
     }
@@ -395,21 +462,26 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
 
     HWND window = CreateWindowExW(
         0, kWindowClass, kTitle,
-        (WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX),
-        CW_USEDEFAULT, CW_USEDEFAULT, 600, 400,
+        WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
+        CW_USEDEFAULT, CW_USEDEFAULT, 716, 530,
         nullptr, nullptr, instance, nullptr);
     if (!window) return 1;
 
     ShowWindow(window, show);
     UpdateWindow(window);
 
-    const fs::path detected = DetectGameDir();
-    if (detected.empty()) {
-        AppendStatus(L"Spiel nicht gefunden. Bitte den Ordner von Hand wählen.");
-    } else if (AdoptGameDir(detected)) {
-        RefreshList();
-        AppendStatus(L"Bereit.");
-    }
+    // A remembered folder wins over detection: the user chose it deliberately.
+    std::wstring startPath = LoadSavedPath();
+    if (!IsValidGameDir(startPath)) startPath = DetectGameDir().wstring();
+    SetWindowTextW(g.pathBox, startPath.c_str());
+    RefreshValidity();
+
+    AppendLog(std::wstring(L"Repository: ") + widen(std::string(kOwner) + "/" + kRepo));
+    if (g.gameDir.empty())
+        AppendLog(L"Spiel nicht gefunden - bitte den Ordner wählen.");
+    else
+        AppendLog(L"Bereit.");
+    ShowVersions(L"—");
 
     MSG message;
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
