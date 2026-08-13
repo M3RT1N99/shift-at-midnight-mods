@@ -25,12 +25,12 @@ namespace OsamaBinLaden
             public int MaximumActive { get; set; } = 1;
             public float ChancePerEligibleEncounter { get; set; } = 1f;
             public float MinimumSpawnDistanceMeters { get; set; } = 10f;
+            public float MaximumSpawnDistanceMeters { get; set; } = 30f;
             public float MaximumLifetimeSeconds { get; set; } = 35f;
         }
 
         internal sealed class AttackCfg
         {
-            public float TriggerDistanceMeters { get; set; } = 30f;
             public float RunSpeedMetersPerSecond { get; set; } = 6f;
             public float DetonationDistanceMeters { get; set; } = 1.75f;
             public float FuseSeconds { get; set; } = 0.35f;
@@ -42,7 +42,6 @@ namespace OsamaBinLaden
             public float ScreamVolume { get; set; } = 0.8f;
             public float ExplosionRadiusMeters { get; set; } = 4f;
             public float ExplosionDamage { get; set; } = 100f;
-            public bool ScreenShake { get; set; }
             public float VisualScale { get; set; } = 1f;
         }
 
@@ -127,9 +126,12 @@ namespace OsamaBinLaden
             Spawn.MaximumActive = 1;
             Spawn.ChancePerEligibleEncounter = Math.Clamp(Spawn.ChancePerEligibleEncounter, 0f, 1f);
             Spawn.MinimumSpawnDistanceMeters = Math.Clamp(Spawn.MinimumSpawnDistanceMeters, 3f, 60f);
+            Spawn.MaximumSpawnDistanceMeters = Math.Clamp(
+                Spawn.MaximumSpawnDistanceMeters,
+                Spawn.MinimumSpawnDistanceMeters,
+                100f);
             Spawn.MaximumLifetimeSeconds = Math.Clamp(Spawn.MaximumLifetimeSeconds, 5f, 180f);
 
-            Attack.TriggerDistanceMeters = Math.Clamp(Attack.TriggerDistanceMeters, 3f, 100f);
             Attack.RunSpeedMetersPerSecond = Math.Clamp(Attack.RunSpeedMetersPerSecond, 1f, 20f);
             Attack.DetonationDistanceMeters = Math.Clamp(Attack.DetonationDistanceMeters, 0.5f, 8f);
             Attack.FuseSeconds = Math.Clamp(Attack.FuseSeconds, 0f, 5f);

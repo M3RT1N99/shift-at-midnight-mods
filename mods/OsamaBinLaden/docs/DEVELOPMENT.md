@@ -2,22 +2,14 @@
 
 ## Current state
 
-This directory currently contains scaffold and policy only. There is no production C#
-source, gameplay implementation, smoke-test project, built DLL or release package.
+The functional MVP is implemented. It observes the rising edge of
+`HuntManager.huntInProgress`, resolves the local `PlayerManager`, creates a runtime-only
+primitive character, charges directly toward the player, plays original generated PCM,
+then shows a local primitive blast and applies bounded distance-based damage.
 
-The intended local sequence is:
-
-1. Identify a safe single-player gameplay state and a stable attack trigger.
-2. Create a local-only NPC using runtime components; do not register or spawn a new Fusion
-   prefab.
-3. On attack, select the local player, enter a charge state and use NavMesh/Astar only
-   after a runtime capability check.
-4. Play a scream through a local `AudioSource` without bundling audio. Any reused clip
-   must already be loaded by the game; any custom file must remain user-owned UserData.
-5. At the configured distance, show a local explosion effect and route damage through the
-   game's `Hittable` component only after its single-player call path is verified.
-6. Destroy the spawned runtime object and clean up every event hook on scene change and
-   mod shutdown.
+There are deliberately no Harmony patches, Fusion spawns, RPCs, reliable-data messages,
+asset bundles, media files or extracted game objects. The direct chase is intentionally a
+first slice and does not yet path around walls.
 
 ## Non-negotiable network gate
 
@@ -33,29 +25,29 @@ partially initialised runner state counts as multiplayer and therefore disables 
   object owned by the mod.
 - Wrap loader, Unity, scene and gameplay callbacks so no exception escapes into the game.
 
-## Suggested source boundaries
+## Source boundaries
 
 - `Main.cs`: MelonLoader attributes and lifecycle only.
 - `Log.cs`: guarded callback helpers.
 - `SessionGate.cs`: fail-closed single-player detection.
-- `NpcController.cs`: explicit idle, charge, detonate and cleanup states.
-- `NpcFactory.cs`: local runtime object/component construction.
-- `TargetResolver.cs`: local-player resolution without peer targeting.
-- `Effects.cs`: local audio, particles and screen effects with graceful fallbacks.
+- `ModController.cs`: Hunt edge, spawn selection, damage boundary and cleanup state.
+- `RuntimeCharacter.cs`: primitives, pursuit, generated sound, fuse and local blast.
+- `SessionGate.cs`: positive solo-mode and local-player proof.
+- `ExplosionMath.cs`: bounded distance falloff independent from Unity.
 - `Config.cs`: bounded configuration loading and validation.
 
 ## Verification gates before packaging
 
-- Add a compile-smoke project with narrow MelonLoader/Unity/game stubs.
-- Test malformed configuration, invalid numeric ranges and atomic config recovery.
-- Test unknown runner state, host/client state and a mid-scene transition to multiplayer;
-  all must leave no NPC and send no network traffic.
-- Test repeated scene loads and shutdown for leaked objects, delegates and coroutines.
+- Keep the existing pure smoke tests green for malformed configuration, bounds, locked
+  safety policy, atomic persistence and damage falloff.
+- Add automated narrow stubs for unknown/host/client session transitions if the controller
+  gains more state or networking APIs.
+- Verify repeated scene loads and shutdown in game for leaked objects or audio clips.
 - Build Debug and Release against the generated IL2CPP assemblies with no warnings.
-- Verify in game that the attack targets only the local player, damage uses `Hittable`, and
-  cleanup is reliable.
+- Verify in game that a real Hunt spawns one figure, pursuit and generated audio work,
+  `PlayerManager.TakeDamage` executes once, and Hunt/scene cleanup is reliable.
+- Verify that entering or joining any non-solo session immediately leaves no owned object.
 - Test installation only against a scratch game directory with a dummy executable.
 - Run the repository content guard and confirm the package contains no assets or media.
 
-Until every gate passes, do not deploy to the real installation and do not package a
-release.
+Until the in-game gates pass, keep the manifest and release notes marked work-in-progress.

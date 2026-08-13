@@ -62,6 +62,16 @@ namespace UnityEngine
         public string name { get; set; }
         public float length { get; set; }
         public bool UnloadAudioData() => true;
+
+        // Mirrors the only overload that survives stripping in the shipped game: the one
+        // taking a PCMReaderCallback, which the mod passes as null.
+        public delegate void PCMReaderCallback(float[] data);
+        public static AudioClip Create(
+            string name, int lengthSamples, int channels, int frequency, bool stream,
+            PCMReaderCallback pcmreadercallback)
+            => new() { name = name, length = frequency > 0 ? lengthSamples / (float)frequency : 0f };
+
+        public bool SetData(float[] data, int offsetSamples) => true;
     }
 
     public class AudioSource : Component

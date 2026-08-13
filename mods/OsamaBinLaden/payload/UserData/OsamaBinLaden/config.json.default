@@ -6,11 +6,13 @@
   "spawn": {
     "enabled": true,
     "maximumActive": 1,
-    "chancePerEligibleEncounter": 0.1
+    "chancePerEligibleEncounter": 1.0,
+    "minimumSpawnDistanceMeters": 10.0,
+    "maximumSpawnDistanceMeters": 30.0,
+    "maximumLifetimeSeconds": 35.0
   },
 
   "attack": {
-    "triggerDistanceMeters": 12.0,
     "runSpeedMetersPerSecond": 6.0,
     "detonationDistanceMeters": 1.75,
     "fuseSeconds": 0.35
@@ -21,7 +23,7 @@
     "screamVolume": 0.8,
     "explosionRadiusMeters": 4.0,
     "explosionDamage": 100.0,
-    "screenShake": true
+    "visualScale": 1.0
   },
 
   "safety": {

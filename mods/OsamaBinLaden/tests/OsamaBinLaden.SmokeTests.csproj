@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <RestoreConfigFile>$(MSBuildThisFileDirectory)NuGet.Config</RestoreConfigFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\src\Config.cs" Link="Production\Config.cs" />
+    <Compile Include="..\src\ExplosionMath.cs" Link="Production\ExplosionMath.cs" />
+    <Compile Include="..\src\Log.cs" Link="Production\Log.cs" />
+  </ItemGroup>
+</Project>

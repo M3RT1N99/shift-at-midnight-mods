@@ -13,7 +13,10 @@ namespace OsamaBinLaden
     {
         public float RunSpeed { get; set; } = 7f;
         public float TriggerDistance { get; set; } = 2.2f;
+        public float FuseSeconds { get; set; } = 0.75f;
+        public float MaximumLifetimeSeconds { get; set; } = 30f;
         public float VisualScale { get; set; } = 1f;
+        public bool ScreamEnabled { get; set; } = true;
         public float ScreamVolume { get; set; } = 0.65f;
         public float ExplosionVisualRadius { get; set; } = 5f;
 
@@ -23,7 +26,10 @@ namespace OsamaBinLaden
             {
                 RunSpeed = ClampFinite(RunSpeed, 0.5f, 20f, 7f),
                 TriggerDistance = ClampFinite(TriggerDistance, 0.25f, 10f, 2.2f),
+                FuseSeconds = ClampFinite(FuseSeconds, 0f, 10f, 0.75f),
+                MaximumLifetimeSeconds = ClampFinite(MaximumLifetimeSeconds, 1f, 300f, 30f),
                 VisualScale = ClampFinite(VisualScale, 0.25f, 3f, 1f),
+                ScreamEnabled = ScreamEnabled,
                 ScreamVolume = ClampFinite(ScreamVolume, 0f, 1f, 0.65f),
                 ExplosionVisualRadius = ClampFinite(ExplosionVisualRadius, 0.5f, 20f, 5f),
             };
@@ -74,6 +80,9 @@ namespace OsamaBinLaden
         private AudioClip _screamClip;
         private LocalExplosionEffect _explosion;
         private float _stridePhase;
+        private float _lifetime;
+        private float _fuseElapsed;
+        private bool _fuseStarted;
         private bool _detonated;
         private bool _disposed;
 
@@ -136,6 +145,23 @@ namespace OsamaBinLaden
                 return;
             }
 
+            _lifetime += dt;
+            if (_lifetime >= _options.MaximumLifetimeSeconds)
+            {
+                Detonate();
+                return;
+            }
+
+            if (_fuseStarted)
+            {
+                _fuseElapsed += dt;
+                if (_fuseElapsed >= _options.FuseSeconds)
+                {
+                    Detonate();
+                    return;
+                }
+            }
+
             if (_root == null)
             {
                 Dispose();
@@ -153,10 +179,15 @@ namespace OsamaBinLaden
             Vector3 offset = targetPosition - current;
             float distance = offset.magnitude;
 
-            if (distance <= _options.TriggerDistance)
+            if (!_fuseStarted && distance <= _options.TriggerDistance)
             {
-                Detonate();
-                return;
+                _fuseStarted = true;
+                _fuseElapsed = 0f;
+                if (_options.FuseSeconds <= 0f)
+                {
+                    Detonate();
+                    return;
+                }
             }
 
             Vector3 planarDirection = new Vector3(offset.x, 0f, offset.z);
@@ -175,11 +206,12 @@ namespace OsamaBinLaden
             _root.transform.position = next;
             AnimateStride(dt, moved);
 
-            // A large frame can cross the trigger radius, so check again after movement.
-            if ((_target.position - next).sqrMagnitude <=
+            // A large frame can cross the fuse radius, so check again after movement.
+            if (!_fuseStarted && (_target.position - next).sqrMagnitude <=
                 _options.TriggerDistance * _options.TriggerDistance)
             {
-                Detonate();
+                _fuseStarted = true;
+                _fuseElapsed = 0f;
             }
         }
 
@@ -199,7 +231,17 @@ namespace OsamaBinLaden
 
             StopScream();
             DestroyCharacterVisuals();
-            _explosion = new LocalExplosionEffect(position, _options.ExplosionVisualRadius);
+            try
+            {
+                _explosion = new LocalExplosionEffect(position, _options.ExplosionVisualRadius);
+            }
+            catch (Exception ex)
+            {
+                // A missing renderer/shader must not suppress the gameplay callback.
+                try { Log.Warn($"cosmetic explosion unavailable ({ex.Message})"); }
+                catch { }
+                _explosion = null;
+            }
 
             // State is already committed before calling outside code. If damage handling
             // fails, this character cannot detonate a second time on the following frame.
@@ -262,7 +304,17 @@ namespace OsamaBinLaden
             _rightLeg = CreatePart("RightLeg", PrimitiveType.Capsule, _root.transform,
                 new Vector3(0.22f, 0.45f, 0f), new Vector3(0.24f, 0.50f, 0.24f), dark);
 
-            CreateScreamSource();
+            try
+            {
+                CreateScreamSource();
+            }
+            catch (Exception ex)
+            {
+                // Audio is optional; pursuit and detonation remain usable without it.
+                StopScream();
+                try { Log.Warn($"procedural scream unavailable ({ex.Message})"); }
+                catch { }
+            }
         }
 
         private Transform CreatePart(
@@ -306,7 +358,7 @@ namespace OsamaBinLaden
 
         private void CreateScreamSource()
         {
-            if (_options.ScreamVolume <= 0f || _root == null) return;
+            if (!_options.ScreamEnabled || _options.ScreamVolume <= 0f || _root == null) return;
 
             _screamClip = SynthesizeScream();
             _screamSource = _root.AddComponent<AudioSource>();
@@ -422,7 +474,16 @@ namespace OsamaBinLaden
         private void TickExplosion(float deltaTime)
         {
             if (_explosion == null) return;
-            _explosion.Tick(deltaTime);
+            try
+            {
+                _explosion.Tick(deltaTime);
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn($"cosmetic explosion stopped ({ex.Message})"); }
+                catch { }
+                _explosion.Dispose();
+            }
             if (!_explosion.IsFinished) return;
 
             _explosion.Dispose();

@@ -10,6 +10,8 @@
     <Version>0.1.0</Version>
     <Authors>Marti</Authors>
     <Product>Osama Bin Laden NPC</Product>
+    <!-- The project has no NuGet dependencies; avoid inheriting machine/user feeds. -->
+    <RestoreConfigFile>$(MSBuildThisFileDirectory)..\NuGet.Config</RestoreConfigFile>
 
     <EnableDynamicLoading>false</EnableDynamicLoading>
     <GenerateDependencyFile>false</GenerateDependencyFile>
@@ -52,15 +54,8 @@
     <Reference Include="UnityEngine.CoreModule" HintPath="$(InteropDir)\UnityEngine.CoreModule.dll" Private="false" />
     <Reference Include="UnityEngine.AudioModule" HintPath="$(InteropDir)\UnityEngine.AudioModule.dll" Private="false" />
     <Reference Include="UnityEngine.PhysicsModule" HintPath="$(InteropDir)\UnityEngine.PhysicsModule.dll" Private="false" />
-    <Reference Include="UnityEngine.ParticleSystemModule" HintPath="$(InteropDir)\UnityEngine.ParticleSystemModule.dll" Private="false" />
-    <Reference Include="UnityEngine.AIModule" HintPath="$(InteropDir)\UnityEngine.AIModule.dll" Private="false" />
     <Reference Include="Assembly-CSharp" HintPath="$(InteropDir)\Assembly-CSharp.dll" Private="false" />
     <Reference Include="Il2CppFusion.Runtime" HintPath="$(InteropDir)\Il2CppFusion.Runtime.dll" Private="false" />
-
-    <Reference Include="Il2CppAstarPathfindingProject"
-               HintPath="$(InteropDir)\Il2CppAstarPathfindingProject.dll"
-               Private="false"
-               Condition="Exists('$(InteropDir)\Il2CppAstarPathfindingProject.dll')" />
   </ItemGroup>
 
 </Project>

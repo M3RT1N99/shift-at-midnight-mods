@@ -38,6 +38,18 @@ stays silent instead of guessing at a substitute.
 
 ---
 
+## OsamaBinLaden
+
+A work-in-progress, single-player-only Hunt monster. It creates a stylised low-poly
+figure at runtime, charges the local player while playing a generated scream, then
+detonates with a local effect and configurable distance-based damage.
+
+It contains no photographs, recordings, models, textures or extracted game assets. The
+runtime refuses to spawn unless the game positively confirms solo mode and re-checks that
+gate before applying damage; it never sends network data.
+
+---
+
 ## sam-mod
 
 A dependency-free installer and updater. SHA-256 comes from Windows CNG, HTTPS from
@@ -78,6 +90,8 @@ into the game once, so it can generate the IL2CPP interop assemblies the plugin 
 ```powershell
 .\mods\MidnightRadio\scripts\build.ps1
 .\scripts\pack.ps1 -Mod MidnightRadio       # produces dist/MidnightRadio-<version>.modpkg
+.\mods\OsamaBinLaden\scripts\build.ps1 -NoDeploy
+.\scripts\pack.ps1 -Mod OsamaBinLaden       # WIP package for local testing
 ```
 
 **The installer** needs only a C++20 compiler — clang++ or MSVC, both from Visual Studio.
@@ -90,6 +104,7 @@ Tests:
 
 ```powershell
 dotnet run --project mods\MidnightRadio\tests\MidnightRadio.SmokeTests.csproj
+dotnet run --project mods\OsamaBinLaden\tests\OsamaBinLaden.SmokeTests.csproj
 ```
 
 ---

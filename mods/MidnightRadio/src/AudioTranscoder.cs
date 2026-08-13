@@ -32,12 +32,26 @@ namespace MidnightRadio
             _cacheDirectory = Path.Combine(dataDirectory, "Cache", "converted");
         }
 
-        /// <summary>Formats Unity loads directly, so they never need touching.</summary>
-        public static bool IsNativelyPlayable(string path)
-        {
-            string extension = Path.GetExtension(path ?? string.Empty).ToLowerInvariant();
-            return extension is ".ogg" or ".oga" or ".wav";
-        }
+        /// <summary>Sample rate every track is decoded to, matching Unity's usual output.</summary>
+        public const int SampleRate = 44100;
+
+        /// <summary>Channel count every track is decoded to.</summary>
+        public const int Channels = 2;
+
+        /// <summary>
+        /// Nothing is natively playable on this build.
+        ///
+        /// UnityWebRequestMultimedia cannot be used: DownloadHandlerAudioClip's
+        /// (string, AudioType) constructor is stripped, so the request throws
+        /// "Method not found" before it starts. AudioClip.Create's simple overload is
+        /// stripped too - only the PCMReaderCallback ones survive, and those are called
+        /// with a null callback so no delegate crosses the interop boundary.
+        ///
+        /// That leaves exactly one route: decode to raw PCM with ffmpeg and push the
+        /// samples in with SetData, which is public and present. So every file, including
+        /// .ogg and .wav, goes through the decoder.
+        /// </summary>
+        public static bool IsNativelyPlayable(string path) => false;
 
         public string CachedPathFor(TrackInfo track)
         {
@@ -48,7 +62,7 @@ namespace MidnightRadio
             foreach (char invalid in Path.GetInvalidFileNameChars()) key = key.Replace(invalid, '_');
             if (key.Length > 64) key = key.Substring(0, 64);
 
-            return Path.Combine(_cacheDirectory, key + ".ogg");
+            return Path.Combine(_cacheDirectory, key + ".pcm");
         }
 
         /// <summary>
@@ -120,14 +134,17 @@ namespace MidnightRadio
                     RedirectStandardError = true,
                 };
 
-                // -vn drops any embedded cover art, which would otherwise make ffmpeg try to
-                // write a video stream into an audio container and fail.
-                foreach (string argument in new[]
+                                foreach (string argument in new[]
                          {
                              "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                              "-i", track.Path,
-                             "-vn", "-c:a", "libvorbis", "-q:a", "5",
-                             "-f", "ogg", temporary,
+                             // -vn drops embedded cover art, which would otherwise make
+                             // ffmpeg try to write a video stream into an audio container.
+                             "-vn",
+                             "-f", "f32le", "-acodec", "pcm_f32le",
+                             "-ar", SampleRate.ToString(),
+                             "-ac", Channels.ToString(),
+                             temporary,
                          })
                     start.ArgumentList.Add(argument);
 
@@ -175,7 +192,7 @@ namespace MidnightRadio
                 if (File.Exists(destination)) File.Delete(destination);
                 File.Move(temporary, destination);
 
-                Log.Info($"converted '{track.Title}' to ogg");
+                Log.Info($"decoded '{track.Title}' to raw pcm");
                 return destination;
             }
             catch (Exception ex)
