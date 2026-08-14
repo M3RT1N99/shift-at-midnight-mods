@@ -32,6 +32,8 @@
 
 #include "github.hpp"
 #include "install.hpp"
+#include "loader.hpp"
+#include "selfupdate.hpp"
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -48,7 +50,7 @@ constexpr const char* kRepo = "shift-at-midnight-mods";
 
 enum : int {
     IdPath = 1001, IdBrowse, IdUpdatePlay, IdUpdateOnly, IdPlayOnly, IdLog, IdStatus, IdVersions,
-    IdMods, IdToggle, IdUninstall
+    IdMods, IdToggle, IdUninstall, IdAllMods, IdInstallLoader
 };
 enum : UINT {
     WmLog = WM_APP + 1,      // lParam = new std::wstring*
@@ -68,7 +70,7 @@ std::wstring widen(const std::string& s) {
 struct App {
     HWND window{}, pathBox{}, browse{}, status{}, versions{}, log{};
     HWND updatePlay{}, updateOnly{}, playOnly{};
-    HWND mods{}, toggle{}, uninstall{};
+    HWND mods{}, toggle{}, uninstall{}, allMods{}, installLoader{};
     HFONT font{}, bigFont{}, monoFont{};
 
     fs::path gameDir;
@@ -199,6 +201,22 @@ int SelectedMod() {
     const LRESULT index = SendMessageW(g.mods, LB_GETCURSEL, 0, 0);
     if (index == LB_ERR || index < 0 || (size_t)index >= g.installed.size()) return -1;
     return (int)index;
+}
+
+void RefreshLoaderState() {
+    if (g.gameDir.empty()) {
+        SetWindowTextW(g.allMods, L"Alle Mods aus");
+        EnableWindow(g.allMods, FALSE);
+        EnableWindow(g.installLoader, FALSE);
+        return;
+    }
+
+    const bool installed = LoaderInstaller::isInstalled(g.gameDir);
+    const bool on = LoaderInstaller::isEnabled(g.gameDir);
+
+    SetWindowTextW(g.allMods, on ? L"Alle Mods aus" : L"Alle Mods an");
+    EnableWindow(g.allMods, installed && !g.busy);
+    EnableWindow(g.installLoader, !installed && !g.busy);
 }
 
 void RefreshToggleLabel() {
@@ -362,10 +380,14 @@ void BuildUi(HWND parent) {
                     522, 172, 166, 30, IdToggle, g.font);
     g.uninstall = Make(parent, L"BUTTON", L"Deinstallieren", BS_PUSHBUTTON,
                        522, 206, 166, 30, IdUninstall, g.font);
+    g.allMods = Make(parent, L"BUTTON", L"Alle Mods aus", BS_PUSHBUTTON,
+                     12, 274, 200, 28, IdAllMods, g.font);
+    g.installLoader = Make(parent, L"BUTTON", L"MelonLoader installieren", BS_PUSHBUTTON,
+                           222, 274, 200, 28, IdInstallLoader, g.font);
 
     g.log = Make(parent, L"EDIT", L"",
                  WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
-                 12, 280, 676, 200, IdLog, g.monoFont);
+                 12, 310, 676, 172, IdLog, g.monoFont);
 }
 
 void AppendLog(const std::wstring& line) {
@@ -420,6 +442,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
             RefreshValidity();
             RefreshMods();
             RefreshToggleLabel();
+            RefreshLoaderState();
             return 0;
 
         case WM_COMMAND: {
@@ -484,6 +507,43 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
                 case IdMods:
                     if (HIWORD(wParam) == LBN_SELCHANGE) RefreshToggleLabel();
                     return 0;
+
+                case IdAllMods: {
+                    if (g.gameDir.empty()) { AppendLog(L"Erst den Spielordner wählen."); return 0; }
+
+                    const bool turnOn = !LoaderInstaller::isEnabled(g.gameDir);
+                    const fs::path dir = g.gameDir;
+
+                    RunAsync([dir, turnOn] {
+                        if (!LoaderInstaller::setEnabled(dir, turnOn)) {
+                            Log(turnOn ? std::wstring(L"Mods waren bereits an.")
+                                       : std::wstring(L"Mods waren bereits aus."));
+                            return;
+                        }
+                        Log(turnOn
+                                ? std::wstring(L"Alle Mods an - MelonLoader lädt wieder.")
+                                : std::wstring(L"Alle Mods aus - das Spiel startet unmodifiziert. "
+                                               L"Nichts wurde entfernt."));
+                    });
+                    return 0;
+                }
+
+                case IdInstallLoader: {
+                    if (g.gameDir.empty()) { AppendLog(L"Erst den Spielordner wählen."); return 0; }
+
+                    const fs::path dir = g.gameDir;
+                    RunAsync([dir] {
+                        if (LoaderInstaller::isInstalled(dir)) {
+                            Log(std::wstring(L"MelonLoader ist bereits installiert."));
+                            if (!LoaderInstaller::hasGeneratedAssemblies(dir))
+                                Log(std::wstring(L"Er lief noch nie - starte das Spiel einmal, "
+                                                 L"damit er sich einrichtet."));
+                            return;
+                        }
+                        LoaderInstaller::install(dir, [](const std::string& line) { Log(line); });
+                    });
+                    return 0;
+                }
 
                 case IdToggle: {
                     const int index = SelectedMod();
@@ -566,7 +626,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
 
     // Centred on the monitor that currently holds the cursor, so it opens where the user
     // is looking rather than wherever Windows would have stacked it.
-    constexpr int kWidth = 716, kHeight = 560;
+    constexpr int kWidth = 716, kHeight = 590;
     int left = CW_USEDEFAULT, top = CW_USEDEFAULT;
     {
         POINT cursor{};
@@ -600,6 +660,20 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
 
     RefreshMods();
     RefreshToggleLabel();
+    RefreshLoaderState();
+
+    // Delete the build displaced by a previous self-update; it cannot be removed while it
+    // is the running process, only on the next start.
+    SelfUpdater::cleanUpPrevious();
+
+    // Check for a newer manager in the background. The point of this tool is that one .exe
+    // can be handed to someone; that fails if their months-old copy cannot install today's
+    // mods. Never blocks startup, and being offline is not an error.
+    std::thread([] {
+        if (SelfUpdater::update(kOwner, kRepo, "sam-mod-gui.exe",
+                                [](const std::string& line) { Log(line); }))
+            Log(std::wstring(L"Bitte den Mod-Manager neu starten, um die neue Version zu nutzen."));
+    }).detach();
 
     AppendLog(std::wstring(L"Repository: ") + widen(std::string(kOwner) + "/" + kRepo));
     if (g.gameDir.empty())

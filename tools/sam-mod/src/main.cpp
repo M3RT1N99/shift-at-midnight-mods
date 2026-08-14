@@ -13,6 +13,7 @@
 
 #include "github.hpp"
 #include "install.hpp"
+#include "loader.hpp"
 #include "json.hpp"
 #include "zip.hpp"
 
@@ -47,6 +48,9 @@ void printUsage() {
         "  enable <slug>           load it again\n"
         "  uninstall <slug>        remove a mod and restore the originals\n"
         "  verify [slug]           check installed files against their recorded hashes\n"
+        "  install-loader          install MelonLoader, which every mod here needs\n"
+        "  mods-off                turn every mod off at once (parks the loader)\n"
+        "  mods-on                 turn them back on\n"
         "  where                   show the detected game directory\n\n"
         "OPTIONS\n"
         "  --game <dir>    game directory (default: auto-detected from Steam)\n"
@@ -143,7 +147,48 @@ int cmdInstall(Installer& installer, const fs::path& package, const Options& opt
     return 0;
 }
 
+void reportToStdout(const std::string& line) {
+    std::cout << "  " << line << "\n";
+}
+
+int cmdInstallLoader(const fs::path& gameDir) {
+    if (LoaderInstaller::isInstalled(gameDir)) {
+        std::cout << "MelonLoader is already installed.\n";
+        if (!LoaderInstaller::hasGeneratedAssemblies(gameDir))
+            std::cout << "It has not run yet - start the game once so it sets itself up.\n";
+        return 0;
+    }
+
+    LoaderInstaller::install(gameDir, reportToStdout);
+    return 0;
+}
+
+/// Turns every mod off at once by parking the loader's proxy DLL.
+int cmdSetLoaderEnabled(const fs::path& gameDir, bool enable) {
+    if (!LoaderInstaller::isInstalled(gameDir) && enable == false) {
+        std::cout << "MelonLoader is not installed, so nothing is loading anyway.\n";
+        return 0;
+    }
+
+    if (!LoaderInstaller::setEnabled(gameDir, enable)) {
+        std::cout << "MelonLoader is already " << (enable ? "enabled" : "disabled") << ".\n";
+        return 0;
+    }
+
+    std::cout << (enable ? "MelonLoader enabled - mods load again.\n"
+                         : "MelonLoader disabled - the game starts unmodded.\n"
+                           "Nothing was removed; enable it again at any time.\n");
+    return 0;
+}
+
 int cmdUpdate(Installer& installer, const Options& options) {
+    // Mods are inert without the loader, so it is installed first rather than leaving the
+    // player with files that quietly do nothing.
+    if (!LoaderInstaller::isInstalled(installer.gameDir())) {
+        std::cout << "MelonLoader is missing; installing it first.\n";
+        LoaderInstaller::install(installer.gameDir(), reportToStdout);
+    }
+
     GitHubSource source(options.owner, options.repo, options.token);
     std::cout << "Checking " << source.slug() << " ...\n";
 
@@ -276,6 +321,9 @@ int main(int argc, char** argv) {
 
         Installer installer(options.gameDir);
 
+        if (command == "install-loader") return cmdInstallLoader(options.gameDir);
+        if (command == "mods-off") return cmdSetLoaderEnabled(options.gameDir, false);
+        if (command == "mods-on")  return cmdSetLoaderEnabled(options.gameDir, true);
         if (command == "list")    return cmdList(installer);
         if (command == "update")  return cmdUpdate(installer, options);
         if (command == "verify")  return cmdVerify(installer, positional);
