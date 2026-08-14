@@ -13,7 +13,7 @@ namespace MidnightRadio
     internal sealed class Config
     {
         /// <summary>Bump when a stored config needs repairing; see <see cref="Migrate"/>.</summary>
-        public const int CurrentVersion = 4;
+        public const int CurrentVersion = 5;
 
         public int Version { get; set; } = CurrentVersion;
 
@@ -52,15 +52,20 @@ namespace MidnightRadio
             // the session actually permits reliable data and falls back to local playback
             // if not - not from shipping the switch off.
             //
-            // It did ship off for one release while the receive hook was unproven, but that made
-            // the feature unreachable in practice: both players install the same package,
-            // so both got it disabled, and "everyone hears the same music" never happened
-            // for anyone who did not hand-edit a file.
+            // OFF, and this time for a measured reason rather than caution.
             //
-            // The risk it was guarding against is now much smaller - the hook is applied
-            // only once a session is actually running, never during load - and the failure
-            // mode is recoverable: set this to false and playback returns to local.
-            public bool Enabled { get; set; } = true;
+            // 1.2.3 turned it on by default. Creating a lobby then crashed the game, and the
+            // log ends on exactly these two lines:
+            //
+            //     Fusion reliable-data receive path is ready
+            //     reliable-data receive hook installed
+            //
+            // So the Harmony patch on FusionCallbackBase.OnReliableDataReceived is not
+            // survivable while a Fusion session is starting. Deferring it out of load only
+            // moved the crash from launch to lobby creation. Until that patch is replaced,
+            // this stays off - a default that crashes multiplayer is worse than a feature
+            // nobody can reach.
+            public bool Enabled { get; set; }
             public int  ProtocolVersion { get; set; } = 1;
 
             public bool AcceptFromOthers { get; set; } = true;
@@ -237,6 +242,21 @@ namespace MidnightRadio
                 Sync.AnyoneCanSkip = true;
 
                 Log.Info("config migrated to version 4: synced playback enabled by default");
+            }
+
+            if (from < 5)
+            {
+                // Undoes version 4. Enabling sync by default made lobby creation crash: the
+                // receive hook cannot be applied while a Fusion session is starting. Anyone
+                // who took 1.2.3 has a config that would crash them again, so it is turned
+                // back off here rather than left to be discovered.
+                if (Sync.Enabled)
+                {
+                    Sync.Enabled = false;
+                    Log.Warn("config migrated to version 5: synced playback disabled again - "
+                             + "the Fusion receive hook crashes lobby creation and is being "
+                             + "replaced");
+                }
             }
         }
 

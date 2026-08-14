@@ -20,7 +20,7 @@ namespace OsamaBinLaden
             Log.Guard("initialize", () =>
             {
                 _controller = new ModController();
-                Log.Info("ready; single-player Hunt encounters only");
+                Log.Info("ready; solo and, if permitted by config, multiplayer Hunt encounters");
             });
         }
 

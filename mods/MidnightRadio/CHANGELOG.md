@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.4 - 2026-08-15
+
+**Fixes a crash in 1.2.3. Update if you have it.**
+
+1.2.3 enabled synchronised playback by default. Creating a lobby then crashed the game,
+with the log ending on exactly these two lines:
+
+    Fusion reliable-data receive path is ready
+    reliable-data receive hook installed
+
+The Harmony patch on `FusionCallbackBase.OnReliableDataReceived` does not survive a Fusion
+session starting up. Deferring it out of the loading path only moved the crash from launch
+to lobby creation - it did not make it safe.
+
+Sync is off again, and configs written by 1.2.3 are migrated back so nobody keeps a setting
+that crashes them. Local playback is unaffected. The receive path needs a different
+mechanism before this can return.
+
 ## 1.2.3 - 2026-08-15
 
 - Synchronised playback is on by default again, and existing configs are migrated to it.

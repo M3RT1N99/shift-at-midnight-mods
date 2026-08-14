@@ -7,7 +7,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>MidnightRadio</AssemblyName>
     <RootNamespace>MidnightRadio</RootNamespace>
-    <Version>1.2.3</Version>
+    <Version>1.2.4</Version>
     <Authors>Marti</Authors>
     <Product>Midnight Radio</Product>
 

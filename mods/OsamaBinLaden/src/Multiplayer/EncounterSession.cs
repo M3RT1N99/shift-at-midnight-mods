@@ -312,9 +312,26 @@ namespace OsamaBinLaden.Multiplayer
             if (encounter == null) return;
 
             // Re-prove target identity at the irreversible gameplay boundary, exactly like the
-            // solo controller re-proves solo mode before calling TakeDamage.
-            if (_transport.RevalidateHostDamageTarget(encounter.TargetRawEncoded, encounter.TargetNetworkId,
-                    out _, out PlayerManager playerManager, out Transform currentTarget))
+            // solo controller re-proves solo mode before calling TakeDamage. A host-on-self
+            // encounter needs the same local resolution solo mode already trusts, not a claim
+            // about a remote player: FusionTransport deliberately never treats the host's own
+            // id as a "confirmed peer", so RevalidateHostDamageTarget can never succeed for it.
+            bool revalidated;
+            PlayerManager playerManager;
+            Transform currentTarget;
+            if (encounter.TargetPlayerId == _transport.LocalPlayerId)
+            {
+                revalidated = _transport.TryResolvePlayer(
+                    encounter.TargetPlayerId, out playerManager, out currentTarget);
+            }
+            else
+            {
+                revalidated = _transport.RevalidateHostDamageTarget(
+                    encounter.TargetRawEncoded, encounter.TargetNetworkId,
+                    out _, out playerManager, out currentTarget);
+            }
+
+            if (revalidated)
             {
                 float distance = Vector3.Distance(info.Position, currentTarget.position);
                 float damage = ExplosionMath.CalculateDamage(
@@ -462,10 +479,15 @@ namespace OsamaBinLaden.Multiplayer
                 }
             }
 
+            if (_validatedPeers.Count == 0) return;
+
+            // One active-player snapshot for every validated peer, instead of one reflection
+            // walk over Fusion's player list per peer.
+            var activePlayers = new HashSet<int>(_transport.ActivePlayerIds());
             List<int> departedPeers = null;
             foreach (int peerId in _validatedPeers.Keys)
             {
-                if (_transport.IsActivePlayer(peerId)) continue;
+                if (activePlayers.Contains(peerId)) continue;
                 (departedPeers ??= new List<int>()).Add(peerId);
             }
             if (departedPeers != null)
@@ -606,10 +628,14 @@ namespace OsamaBinLaden.Multiplayer
         {
             if (_clientPhase != ClientHandshakePhase.AwaitingAck) return;
             if (message.ClientNonce != _clientNonce || message.HostPlayerId < 0) return;
+            // This is the message that bootstraps trust in "who is the host" for every later
+            // steady-state check; the payload's claimed identity must match Fusion's own
+            // sender, not be taken on its word.
+            if (senderPlayerId != message.HostPlayerId) return;
 
             _learnedHostEpoch = message.HostEpoch;
             _learnedHostNonce = message.HostNonce;
-            _learnedHostPlayerId = message.HostPlayerId;
+            _learnedHostPlayerId = senderPlayerId;
             _clientReplayGuard.Reset();
             _clientLastHostMessageRealtime = Time.realtimeSinceStartup;
 

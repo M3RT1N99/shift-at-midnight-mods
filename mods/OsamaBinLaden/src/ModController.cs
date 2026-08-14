@@ -131,12 +131,9 @@ namespace OsamaBinLaden
                 return false;
 
             _multiplayer ??= new EncounterSession(_config);
-            if (!_multiplayer.IsActive)
-            {
-                _multiplayer.Reset();
-                return false;
-            }
+            if (!_multiplayer.IsActive) return false;
 
+            _gateWarningShown = false;
             _multiplayer.Update(Time.deltaTime);
             return true;
         }

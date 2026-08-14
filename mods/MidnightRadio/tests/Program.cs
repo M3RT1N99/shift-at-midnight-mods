@@ -443,7 +443,14 @@ namespace MidnightRadio.SmokeTests
                 var migrated = Config.Load(path);
 
                 Equal(Config.CurrentVersion, migrated.Version, "version bumped");
-                True(migrated.Sync.Enabled, "sync re-enabled");
+
+                // Version 4 turned sync on; version 5 turns it back off, because enabling it
+                // by default crashed lobby creation. The end state is what matters, and it
+                // is off until the receive hook is replaced.
+                False(migrated.Sync.Enabled, "sync left disabled");
+
+                // The open-queue settings still describe the intended behaviour for when it
+                // is switched back on, so they are repaired either way.
                 True(migrated.Sync.AcceptFromOthers, "accepts others again");
                 True(migrated.Sync.AnyoneCanQueue, "open queue restored");
                 True(migrated.Sync.AnyoneCanSkip, "skip restored");
