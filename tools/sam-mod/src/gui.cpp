@@ -35,6 +35,7 @@
 #include "loader.hpp"
 #include "selfupdate.hpp"
 #include "steam.hpp"
+#include "version.hpp"
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -44,7 +45,12 @@ using namespace sam;
 namespace {
 
 constexpr const wchar_t* kWindowClass = L"SamModGuiWindow";
-constexpr const wchar_t* kTitle = L"Shift At Midnight - Mod Updater";
+// Built once at startup: the title carries the version, so "which build is this?" is
+// answerable from the window itself rather than from a properties dialog.
+std::wstring g_title;
+
+const wchar_t* Title() { return g_title.c_str(); }
+constexpr const wchar_t* kWindowTitleBase = L"Shift At Midnight - Mod Updater";
 constexpr const wchar_t* kGameExe = L"ShiftAtMidnight.exe";
 constexpr const char* kOwner = "M3RT1N99";
 constexpr const char* kRepo = "shift-at-midnight-mods";
@@ -574,7 +580,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
                                     L"Der Spielordner stimmt nicht - ShiftAtMidnight.exe wurde "
                                     L"dort nicht gefunden.\n\nWähle den Ordner über "
                                     L"„Durchsuchen“.",
-                                    kTitle, MB_OK | MB_ICONWARNING);
+                                    Title(), MB_OK | MB_ICONWARNING);
                         return 0;
                     }
 
@@ -586,7 +592,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
                             L"Shift At Midnight läuft gerade. Die Mod-Dateien sind dann "
                             L"gesperrt und können nicht ersetzt werden.\n\n"
                             L"Schließe das Spiel und klicke dann OK.",
-                            kTitle, MB_OKCANCEL | MB_ICONWARNING);
+                            Title(), MB_OKCANCEL | MB_ICONWARNING);
                         if (answer != IDOK) { AppendLog(L"Abgebrochen (Spiel läuft)."); return 0; }
                         if (IsGameRunning()) {
                             AppendLog(L"Spiel läuft weiterhin - abgebrochen.");
@@ -672,7 +678,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
                         L"Die Originaldateien des Spiels werden wiederhergestellt. "
                         L"Deine Musik und Einstellungen bleiben erhalten.\r\n\r\n"
                         L"Zum vorübergehenden Abschalten reicht „Deaktivieren“.";
-                    if (MessageBoxW(window, question.c_str(), kTitle,
+                    if (MessageBoxW(window, question.c_str(), Title(),
                                     MB_YESNO | MB_ICONQUESTION) != IDYES)
                         return 0;
 
@@ -692,7 +698,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
             if (g.busy) {
                 if (MessageBoxW(window,
                                 L"Es läuft noch eine Installation. Trotzdem beenden?",
-                                kTitle, MB_YESNO | MB_ICONWARNING) != IDYES)
+                                Title(), MB_YESNO | MB_ICONWARNING) != IDYES)
                     return 0;
             }
             DestroyWindow(window);
@@ -713,6 +719,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&controls);
     theme::create();
+
+    // widen() rather than an iterator-pair construction: begin() and end() taken from two
+    // separate temporaries point into different objects, which is undefined behaviour and
+    // fails fast at startup.
+    g_title = std::wstring(kWindowTitleBase) + L"  " + widen(kManagerVersion);
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     WNDCLASSEXW cls{};
@@ -743,7 +754,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     }
 
     HWND window = CreateWindowExW(
-        0, kWindowClass, kTitle,
+        0, kWindowClass, Title(),
         WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
         left, top, kWidth, kHeight,
         nullptr, nullptr, instance, nullptr);
@@ -767,6 +778,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     // is the running process, only on the next start.
     SelfUpdater::cleanUpPrevious();
 
+    // Older builds kept the game path in a text file beside the executable. Detection
+    // replaced it, so the leftover is swept up rather than left to puzzle anyone.
+    {
+        wchar_t module[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, module, MAX_PATH);
+        std::error_code ignored;
+        fs::remove(fs::path(module).parent_path() / "sam-mod-gui.txt", ignored);
+    }
+
     // Check for a newer manager in the background. The point of this tool is that one .exe
     // can be handed to someone; that fails if their months-old copy cannot install today's
     // mods. Never blocks startup, and being offline is not an error.
@@ -776,6 +796,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
             Log(std::wstring(L"Bitte den Mod-Manager neu starten, um die neue Version zu nutzen."));
     }).detach();
 
+    AppendLog(L"Mod-Manager " + g_title.substr(g_title.find_last_of(L' ') + 1));
     AppendLog(std::wstring(L"Repository: ") + widen(std::string(kOwner) + "/" + kRepo));
     if (g.gameDir.empty())
         AppendLog(L"Spiel nicht gefunden - bitte den Ordner wählen.");

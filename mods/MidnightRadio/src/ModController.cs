@@ -30,6 +30,12 @@ namespace MidnightRadio
 
         private RadioTarget _radio;
         private float _nextResolve;
+        private float _resolveInterval = 1f;
+        private float _nextHeartbeat;
+        private long _frames;
+
+        /// <summary>Upper bound on the retry gap; a scene scan is not cheap.</summary>
+        private const float MaxResolveInterval = 20f;
         private float _nextReceiveHookAttempt;
         private bool _toolUpdateStarted;
 
@@ -115,9 +121,30 @@ namespace MidnightRadio
             MainThread.Drain();
 
             float now = Time.realtimeSinceStartup;
+
+            // A heartbeat, so a stalled game can be told apart from a stalled mod: if these
+            // stop, our Update stopped; if they continue while nothing else happens, the
+            // hang is elsewhere.
+            if (now >= _nextHeartbeat)
+            {
+                _nextHeartbeat = now + 10f;
+                string beat = $"alive: {now:F0}s, frame {_frames}, " +
+                              $"radio={(_radio != null && _radio.IsValid)}";
+
+                // Loud for the first minute, which is the window a startup hang lives in,
+                // then quiet so it does not fill the log for the rest of the session.
+                if (now < 60f) Log.Info(beat); else Log.Debug(beat);
+            }
+            _frames++;
+
             if ((_radio == null || !_radio.IsValid) && now >= _nextResolve)
             {
-                _nextResolve = now + 2f;
+                // Backs off when the radio is not there. Searching every two seconds from
+                // the first frame meant scanning the whole scene over and over while it was
+                // still loading, which is exactly when a scan is most expensive and least
+                // likely to find a boombox nobody has placed yet.
+                _resolveInterval = Math.Min(_resolveInterval * 1.5f, MaxResolveInterval);
+                _nextResolve = now + _resolveInterval;
                 ResolveRadio();
             }
 
@@ -206,6 +233,7 @@ namespace MidnightRadio
                 var found = RadioTarget.TryResolve();
                 if (found == null) return;
                 _radio = found;
+                _resolveInterval = 1f;
                 _player.SetTarget(found);
 
                 // The prompt otherwise still reads "Toggle Music", which is no longer what

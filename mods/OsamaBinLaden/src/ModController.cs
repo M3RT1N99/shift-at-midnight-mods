@@ -134,44 +134,15 @@ namespace OsamaBinLaden
 
         private Vector3 ResolveSpawnPosition(HuntManager hunt, Transform target)
         {
-            Vector3 targetPosition = target.position;
-            Vector3 selected = default;
-            float selectedDistance = float.NegativeInfinity;
-            bool found = false;
-
             var points = hunt.huntSpawnPoints;
-            if (points != null)
-            {
-                for (int index = 0; index < points.Length; index++)
-                {
-                    Transform point = points[index];
-                    if (point == null || !point || !point.gameObject.scene.IsValid() ||
-                        !point.gameObject.scene.isLoaded)
-                        continue;
-
-                    float distance = Vector3.Distance(point.position, targetPosition);
-                    if (distance < _config.Spawn.MinimumSpawnDistanceMeters ||
-                        distance > _config.Spawn.MaximumSpawnDistanceMeters ||
-                        distance <= selectedDistance)
-                        continue;
-
-                    selected = point.position;
-                    selectedDistance = distance;
-                    found = true;
-                }
-            }
-
-            if (found) return selected;
-
-            float fallbackDistance = Math.Clamp(
-                _config.Spawn.MaximumSpawnDistanceMeters * 0.75f,
+            int count = points != null ? points.Length : 0;
+            return SpawnPlacement.Resolve(
+                count,
+                index => points[index],
+                target.position,
+                target.forward,
                 _config.Spawn.MinimumSpawnDistanceMeters,
-                30f);
-            Vector3 backward = -target.forward;
-            backward.y = 0f;
-            if (backward.sqrMagnitude < 0.01f) backward = Vector3.back;
-            backward.Normalize();
-            return targetPosition + (backward * fallbackDistance);
+                _config.Spawn.MaximumSpawnDistanceMeters);
         }
 
         private void OnDetonated(RuntimeCharacter.DetonationInfo info)
