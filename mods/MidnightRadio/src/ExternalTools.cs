@@ -621,10 +621,16 @@ namespace MidnightRadio
                 );
             }
 
+            // Provisioned into Tools/ alongside yt-dlp; empty when absent, which yt-dlp
+            // handles by falling back to its default (fewer formats, still functional).
+            string jsRuntime = Path.Combine(_dataDirectory, "Tools", "deno.exe");
+            if (!File.Exists(jsRuntime)) jsRuntime = null;
+
             var arguments = BuildDownloadArguments(
                 normalizedUrl,
                 cacheDirectory,
                 ffmpeg.ExecutablePath,
+                jsRuntime,
                 allowPlaylists,
                 maxDurationMinutes,
                 audioFormat,
@@ -832,6 +838,7 @@ namespace MidnightRadio
             string url,
             string cacheDirectory,
             string ffmpegPath,
+            string jsRuntimePath,
             bool allowPlaylists,
             int maxDurationMinutes,
             string audioFormat,
@@ -865,6 +872,16 @@ namespace MidnightRadio
                 "--match-filters", $"!is_live & duration <= {maxDurationMinutes * 60}",
                 "--print", "after_move:" + FileMarker + "%(filepath)s",
             };
+
+            // YouTube extraction without a JavaScript runtime is deprecated and silently
+            // drops formats. Deno is what yt-dlp enables by default, so it is passed
+            // explicitly with its location because ours lives in the mod's Tools folder
+            // rather than on PATH. Absent runtime: yt-dlp still runs, with fewer formats.
+            if (!string.IsNullOrEmpty(jsRuntimePath))
+            {
+                args.Add("--js-runtimes");
+                args.Add("deno:" + jsRuntimePath);
+            }
 
             if (!allowPlaylists) args.Add("--no-playlist");
 

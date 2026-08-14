@@ -400,6 +400,11 @@ namespace MidnightRadio
 
             // yt-dlp needs ffmpeg to extract audio, so a missing one is not optional here.
             await _provisioner.EnsureFfmpegAsync(status, _shutdown.Token).ConfigureAwait(false);
+
+            // Deno is a degradation rather than a hard requirement: without a JavaScript
+            // runtime yt-dlp still runs, but YouTube extraction is deprecated in that mode
+            // and quietly drops formats. Fetched, not required.
+            await _provisioner.EnsureDenoAsync(status, _shutdown.Token).ConfigureAwait(false);
             return true;
         }
 

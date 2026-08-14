@@ -29,6 +29,11 @@ namespace MidnightRadio
             "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
         private const string FfmpegUrl =
             "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
+        // yt-dlp needs a JavaScript runtime for YouTube: without one it warns that
+        // "extraction without a JS runtime has been deprecated, and some formats may be
+        // missing". Deno is the runtime yt-dlp enables by default, so it is the one to fetch.
+        private const string DenoUrl =
+            "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
 
         private readonly string _toolsDirectory;
         private readonly SemaphoreSlim _oneAtATime = new(1, 1);
@@ -41,9 +46,63 @@ namespace MidnightRadio
         public string YtDlpPath => Path.Combine(_toolsDirectory, "yt-dlp.exe");
         public string FfmpegPath => Path.Combine(_toolsDirectory, "ffmpeg.exe");
         public string FfprobePath => Path.Combine(_toolsDirectory, "ffprobe.exe");
+        public string DenoPath => Path.Combine(_toolsDirectory, "deno.exe");
 
         public bool HasYtDlp => File.Exists(YtDlpPath);
         public bool HasFfmpeg => File.Exists(FfmpegPath);
+        public bool HasDeno => File.Exists(DenoPath);
+
+        /// <summary>
+        /// Downloads Deno if absent. Returns its path, or null - a missing JS runtime is a
+        /// degradation, not a failure: yt-dlp still works, just with fewer formats.
+        /// </summary>
+        public async Task<string> EnsureDenoAsync(
+            IProgress<string> status, CancellationToken cancellationToken)
+        {
+            if (HasDeno) return DenoPath;
+
+            return await Serialise(async () =>
+            {
+                if (HasDeno) return DenoPath;
+
+                status?.Report("Lade JavaScript-Laufzeit (Deno) …");
+                Directory.CreateDirectory(_toolsDirectory);
+
+                string archive = Path.Combine(_toolsDirectory, "deno-download.zip");
+                try
+                {
+                    if (!await DownloadToFileAsync(DenoUrl, archive, status, cancellationToken)
+                            .ConfigureAwait(false))
+                        return null;
+
+                    using (var zip = ZipFile.OpenRead(archive))
+                    {
+                        foreach (var entry in zip.Entries)
+                        {
+                            if (!string.Equals(Path.GetFileName(entry.FullName), "deno.exe",
+                                    StringComparison.OrdinalIgnoreCase))
+                                continue;
+                            entry.ExtractToFile(DenoPath, overwrite: true);
+                            break;
+                        }
+                    }
+
+                    if (!HasDeno)
+                    {
+                        Log.Warn("the Deno archive contained no deno.exe");
+                        return null;
+                    }
+
+                    Log.Info("Deno downloaded; yt-dlp can use it as a JavaScript runtime");
+                    status?.Report("JavaScript-Laufzeit bereit.");
+                    return DenoPath;
+                }
+                finally
+                {
+                    try { if (File.Exists(archive)) File.Delete(archive); } catch { }
+                }
+            }).ConfigureAwait(false);
+        }
 
         /// <summary>Downloads yt-dlp if it is not already present. Returns its path, or null.</summary>
         public async Task<string> EnsureYtDlpAsync(
