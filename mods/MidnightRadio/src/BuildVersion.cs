@@ -10,6 +10,6 @@ namespace MidnightRadio
     /// </summary>
     internal static class BuildVersion
     {
-        public const string Value = "1.1.1";
+        public const string Value = "1.2.0";
     }
 }

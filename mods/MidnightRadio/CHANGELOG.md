@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.0 - 2026-08-14
+
+The mod, the manager and the release tag now share one version number. They had drifted
+apart, and the self-update could never fire because it compared two different scales.
+
+### Fixed
+- The game hung on the splash screen. The tool-update check was started from mod init as
+  "fire and forget", but an async method runs synchronously up to its first await - and
+  this one launches yt-dlp.exe, about a second, on the thread loading the game. It now runs
+  on its own thread, well after load.
+- The same probe redirected stderr without draining it. Once the pipe buffer fills the
+  child blocks on write and the wait never returns; yt-dlp writes there routinely.
+
+### Changed
+- The manager finds the game through Steam's registry entry and libraryfolders.vdf instead
+  of guessing paths, so unusual library locations just work. The settings file it used to
+  write is gone with it - it only ever remembered a hand-typed path because the guesses
+  missed.
+- The console front end is no longer built. The window is what gets handed to a player, and
+  maintaining two front ends for one audience earned nothing.
+- The manager installs MelonLoader itself when it is missing, and can turn every mod off at
+  once by parking the loader.
+- Dark theme, with hover and pressed states drawn by hand.
+
 ## 1.1.1 - 2026-08-13
 
 - Downloaded tracks are named after the video title instead of its id. The playlist
