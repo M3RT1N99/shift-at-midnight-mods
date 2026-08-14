@@ -7,7 +7,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>OsamaBinLaden</AssemblyName>
     <RootNamespace>OsamaBinLaden</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Marti</Authors>
     <Product>Osama Bin Laden NPC</Product>
     <!-- The project has no NuGet dependencies; avoid inheriting machine/user feeds. -->

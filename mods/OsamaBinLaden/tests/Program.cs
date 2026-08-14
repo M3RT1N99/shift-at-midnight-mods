@@ -19,7 +19,8 @@ internal static class Program
         {
             Run("Config missing/malformed JSON uses safe defaults", () => TestSafeDefaults(temporaryRoot));
             Run("Config repairs null sections", () => TestNullSections(temporaryRoot));
-            Run("Config clamps values and enforces offline policy", TestClampAndPolicy);
+            Run("Config clamps values and bounds multiplayer timing", TestClampAndPolicy);
+            Run("Config mirrors the single-player-only opt-out both ways", TestSinglePlayerOnlyMirroring);
             Run("Config save is atomic and round-trips", () => TestSaveRoundTrip(temporaryRoot));
             Run("ExplosionMath full damage inside trigger", TestFullDamage);
             Run("ExplosionMath uses linear falloff", TestLinearFalloff);
@@ -32,6 +33,9 @@ internal static class Program
             Run("Encounter protocol enforces extreme caps", TestProtocolCaps);
             Run("Encounter protocol enforces three-way handshake shapes", TestProtocolHandshakeValidation);
             Run("Encounter protocol marks authoritative messages", TestProtocolAuthorityMetadata);
+            Run("SequenceGuard accepts strictly increasing sequences", TestSequenceGuardAccepts);
+            Run("SequenceGuard rejects replays, duplicates and zero", TestSequenceGuardRejects);
+            Run("SequenceGuard follows a newer epoch and refuses an older one", TestSequenceGuardEpoch);
         }
         finally
         {
@@ -47,7 +51,7 @@ internal static class Program
 
         if (Failures.Count == 0)
         {
-            Console.WriteLine("PASS: all 15 smoke tests passed");
+            Console.WriteLine("PASS: all 19 smoke tests passed");
             return 0;
         }
 
@@ -61,15 +65,18 @@ internal static class Program
     {
         string missingPath = Path.Combine(root, "missing", "config.json");
         Config missing = Config.Load(missingPath);
-        AssertSafePolicy(missing);
+        AssertMirroredMultiplayerPolicy(missing);
         Equal(true, missing.Enabled, "missing config: Enabled");
+        Equal(false, missing.SinglePlayerOnly, "missing config: multiplayer on by default");
+        Equal(true, missing.Safety.AllowNetworkSends, "missing config: network sends allowed by default");
         Equal(1, missing.Spawn.MaximumActive, "missing config: MaximumActive");
         Near(6f, missing.Attack.RunSpeedMetersPerSecond, "missing config: run speed");
+        Near(8f, missing.Multiplayer.HandshakeTimeoutSeconds, "missing config: handshake timeout");
 
         string malformedPath = Path.Combine(root, "malformed.json");
         File.WriteAllText(malformedPath, "{ this is not valid JSON");
         Config malformed = Config.Load(malformedPath);
-        AssertSafePolicy(malformed);
+        AssertMirroredMultiplayerPolicy(malformed);
         Equal(true, malformed.Spawn.Enabled, "malformed config: spawn enabled");
         Near(100f, malformed.Effects.ExplosionDamage, "malformed config: damage");
     }
@@ -80,7 +87,7 @@ internal static class Program
         File.WriteAllText(
             path,
             "{\"singlePlayerOnly\":false,\"spawn\":null,\"attack\":null," +
-            "\"effects\":null,\"safety\":null,\"logging\":null}");
+            "\"effects\":null,\"safety\":null,\"logging\":null,\"multiplayer\":null}");
 
         Config config = Config.Load(path);
 
@@ -89,9 +96,11 @@ internal static class Program
         NotNull(config.Effects, "Effects section");
         NotNull(config.Safety, "Safety section");
         NotNull(config.Logging, "Logging section");
-        AssertSafePolicy(config);
+        NotNull(config.Multiplayer, "Multiplayer section");
+        AssertMirroredMultiplayerPolicy(config);
         Near(35f, config.Spawn.MaximumLifetimeSeconds, "repaired spawn defaults");
         Near(4f, config.Effects.ExplosionRadiusMeters, "repaired effects defaults");
+        Near(4f, config.Multiplayer.HeartbeatIntervalSeconds, "repaired multiplayer defaults");
     }
 
     private static void TestClampAndPolicy()
@@ -126,7 +135,14 @@ internal static class Program
                 DisableInMultiplayer = false,
                 AllowNetworkSends = true
             },
-            Logging = new Config.LoggingCfg { Level = "trace" }
+            Logging = new Config.LoggingCfg { Level = "trace" },
+            Multiplayer = new Config.MultiplayerCfg
+            {
+                HandshakeTimeoutSeconds = -5f,
+                HeartbeatIntervalSeconds = 999f,
+                PeerTimeoutSeconds = 0f,
+                HostMarkerRepublishSeconds = 999f
+            }
         };
 
         config.Clamp();
@@ -145,7 +161,33 @@ internal static class Program
         Near(500f, config.Effects.ExplosionDamage, "damage upper bound");
         Near(0.5f, config.Effects.VisualScale, "visual scale lower bound");
         Equal("info", config.Logging.Level, "logging allow-list");
-        AssertSafePolicy(config);
+        Equal(false, config.SinglePlayerOnly, "SinglePlayerOnly stays false when never requested");
+        Equal(true, config.Safety.AllowNetworkSends, "AllowNetworkSends is left exactly as set");
+        AssertMirroredMultiplayerPolicy(config);
+        Near(2f, config.Multiplayer.HandshakeTimeoutSeconds, "handshake timeout lower bound");
+        Near(15f, config.Multiplayer.HeartbeatIntervalSeconds, "heartbeat interval upper bound");
+        Near(5f, config.Multiplayer.PeerTimeoutSeconds, "peer timeout lower bound");
+        Near(30f, config.Multiplayer.HostMarkerRepublishSeconds, "marker republish upper bound");
+    }
+
+    private static void TestSinglePlayerOnlyMirroring()
+    {
+        Config bySinglePlayerOnly = new Config { SinglePlayerOnly = true };
+        bySinglePlayerOnly.Clamp();
+        Equal(true, bySinglePlayerOnly.SinglePlayerOnly, "SinglePlayerOnly stays true when requested");
+        Equal(true, bySinglePlayerOnly.Safety.DisableInMultiplayer, "SinglePlayerOnly forces DisableInMultiplayer true");
+
+        Config byDisableInMultiplayer = new Config();
+        byDisableInMultiplayer.Safety.DisableInMultiplayer = true;
+        byDisableInMultiplayer.Clamp();
+        Equal(true, byDisableInMultiplayer.SinglePlayerOnly, "DisableInMultiplayer forces SinglePlayerOnly true");
+        Equal(true, byDisableInMultiplayer.Safety.DisableInMultiplayer, "DisableInMultiplayer stays true");
+
+        Config neither = new Config();
+        neither.Clamp();
+        Equal(false, neither.SinglePlayerOnly, "multiplayer stays on when neither opt-out is set");
+        Equal(false, neither.Safety.DisableInMultiplayer, "multiplayer stays on when neither opt-out is set");
+        Equal(true, neither.Safety.AllowNetworkSends, "network sends are allowed by default");
     }
 
     private static void TestSaveRoundTrip(string root)
@@ -169,7 +211,9 @@ internal static class Program
         Near(0.42f, loaded.Spawn.ChancePerEligibleEncounter, "round-trip chance");
         Near(8.5f, loaded.Attack.RunSpeedMetersPerSecond, "round-trip speed");
         Near(123f, loaded.Effects.ExplosionDamage, "round-trip damage");
-        AssertSafePolicy(loaded);
+        Equal(false, loaded.SinglePlayerOnly, "round-trip SinglePlayerOnly stays false");
+        Equal(true, loaded.Safety.AllowNetworkSends, "round-trip AllowNetworkSends stays true");
+        AssertMirroredMultiplayerPolicy(loaded);
     }
 
     private static void TestFullDamage()
@@ -457,6 +501,37 @@ internal static class Program
         Equal(true, EncounterProtocol.RequiresHostSender(EncounterMessageType.Cancel), "cancel sender");
     }
 
+    private static void TestSequenceGuardAccepts()
+    {
+        var guard = new SequenceGuard();
+        Equal(true, guard.TryAccept(1, 1), "first sequence in epoch 1");
+        Equal(true, guard.TryAccept(1, 2), "second sequence in epoch 1");
+        Equal(true, guard.TryAccept(1, 10), "sequence may skip ahead");
+    }
+
+    private static void TestSequenceGuardRejects()
+    {
+        var guard = new SequenceGuard();
+        Equal(false, guard.TryAccept(1, 0), "sequence zero is never valid");
+        Equal(true, guard.TryAccept(1, 5), "establish a baseline");
+        Equal(false, guard.TryAccept(1, 5), "exact replay is rejected");
+        Equal(false, guard.TryAccept(1, 3), "older sequence is rejected");
+        Equal(false, guard.TryAccept(0, 6), "an older epoch is rejected outright");
+
+        guard.Reset();
+        Equal(true, guard.TryAccept(1, 1), "reset clears the tracked baseline");
+    }
+
+    private static void TestSequenceGuardEpoch()
+    {
+        var guard = new SequenceGuard();
+        Equal(true, guard.TryAccept(1, 100), "baseline in epoch 1");
+        Equal(true, guard.TryAccept(2, 1), "a newer epoch resets the sequence floor");
+        Equal(false, guard.TryAccept(2, 1), "the same (epoch, sequence) pair cannot repeat");
+        Equal(true, guard.TryAccept(2, 2), "epoch 2 still requires increasing sequences");
+        Equal(false, guard.TryAccept(1, 999), "epoch 1 can never come back once epoch 2 was seen");
+    }
+
     private static EncounterMessage CreateProtocolMessage(EncounterMessageType type)
     {
         bool encounter = type == EncounterMessageType.Spawn ||
@@ -499,11 +574,12 @@ internal static class Program
         };
     }
 
-    private static void AssertSafePolicy(Config config)
+    /// <summary>SinglePlayerOnly and Safety.DisableInMultiplayer are two names for the same
+    /// opt-out and must never disagree after Clamp, whichever value each started with.</summary>
+    private static void AssertMirroredMultiplayerPolicy(Config config)
     {
-        Equal(true, config.SinglePlayerOnly, "SinglePlayerOnly policy");
-        Equal(true, config.Safety.DisableInMultiplayer, "DisableInMultiplayer policy");
-        Equal(false, config.Safety.AllowNetworkSends, "AllowNetworkSends policy");
+        Equal(config.SinglePlayerOnly, config.Safety.DisableInMultiplayer,
+            "SinglePlayerOnly mirrors Safety.DisableInMultiplayer");
     }
 
     private static void Run(string name, Action test)

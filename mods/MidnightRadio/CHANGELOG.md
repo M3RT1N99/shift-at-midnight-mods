@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.2 - 2026-08-15
+
+- The manager starts the game through Steam instead of running the executable directly.
+  Launching the exe was copied from a 7 Days To Die updater, where bypassing the launcher
+  is deliberate; here it left the game without Steam's context, so SteamAPI_Init() failed,
+  the game's own PlatformManager threw in a loop, and it sat on the splash screen. That
+  looked exactly like a mod hang and was chased as one twice. MelonLoader is unaffected
+  either way, since the version.dll proxy loads regardless of who started the process.
+
 ## 1.2.1 - 2026-08-15
 
 - Fixed the splash-screen hang. ResolveRadio ran every two seconds from the first frame,

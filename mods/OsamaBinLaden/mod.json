@@ -3,18 +3,18 @@
   "id": "io.github.m3rt1n99.osamabinladen",
   "slug": "OsamaBinLaden",
   "name": "Osama Bin Laden NPC",
-  "version": "0.1.0",
-  "releaseDate": "2026-08-13",
+  "version": "0.2.0",
+  "releaseDate": "2026-08-15",
   "author": {
     "name": "Marti",
     "contact": "https://github.com/M3RT1N99"
   },
   "license": "MIT",
   "homepage": null,
-  "tags": ["npc", "monster", "single-player", "work-in-progress"],
+  "tags": ["npc", "monster", "multiplayer", "work-in-progress"],
   "description": {
-    "en": "Work-in-progress single-player monster NPC that charges the local player, screams and detonates when it attacks. No character art, audio, game assets or media are included.",
-    "de": "In Entwicklung befindlicher Einzelspieler-Monster-NPC, der beim Angriff schreiend auf den lokalen Spieler zurennt und sich hochjagt. Es werden keine Charaktergrafiken, Audiodateien, Spielressourcen oder Medien mitgeliefert."
+    "en": "Work-in-progress monster NPC that charges a player, screams and detonates when it attacks. Works solo and, host-authoritatively, in multiplayer: only players who also have the mod installed can ever be targeted, and only the Fusion host ever applies damage. No character art, audio, game assets or media are included.",
+    "de": "In Entwicklung befindlicher Monster-NPC, der beim Angriff schreiend auf einen Spieler zurennt und sich hochjagt. Funktioniert solo und, host-autoritativ, im Multiplayer: Nur Spieler, die den Mod ebenfalls installiert haben, können anvisiert werden, und nur der Fusion-Host wendet Schaden an. Es werden keine Charaktergrafiken, Audiodateien, Spielressourcen oder Medien mitgeliefert."
   },
 
   "game": {
@@ -80,29 +80,29 @@
   },
 
   "capabilities": {
-    "localOnly": true,
-    "singlePlayerOnly": true,
-    "coopSafe": false,
+    "localOnly": false,
+    "singlePlayerOnly": false,
+    "coopSafe": true,
     "modifiesGameFiles": false,
     "modifiesGameAssets": false,
     "replacesGameAssets": false,
     "containsGameAssets": false,
     "containsMedia": false,
     "writesOutsideGameDir": false,
-    "networkAccess": "none",
+    "networkAccess": "fusion-reliable-data",
     "spawnsProcesses": false,
     "requiresExternalTools": false,
     "optionalExternalTools": false,
-    "sendsNetworkRpcs": false,
+    "sendsNetworkRpcs": true,
     "requiresRestart": true,
     "hotReloadable": false,
 
     "multiplayer": {
-      "impact": "disabled",
+      "impact": "host-authoritative-encounter",
       "allPlayersNeedMod": false,
       "unmoddedPlayersAffected": false,
-      "authority": "local-only",
-      "notes": "The mod must fail closed before spawning anything whenever a Fusion multiplayer session is active, and must despawn or disable its local objects if the session state changes. It never sends RPCs or reliable-data messages."
+      "authority": "host-authoritative",
+      "notes": "The mod must positively confirm a live Fusion session before doing anything, and fails closed on ambiguous or unknown session state, in solo and in multiplayer alike. In multiplayer, only the Fusion host simulates the encounter and calls PlayerManager.TakeDamage; every other player only ever renders a cosmetic mirror driven by the host's Spawn/Detonate/Cancel messages. Eligible targets are limited to the host itself and players who complete a lightweight handshake, proving they run this mod - a player without the mod is never targeted and never receives a message, so unmodded players are unaffected. Sends bounded, versioned reliable-data frames over Fusion's existing channel; never a raw socket, never a Fusion object spawn, never a replicated-object write."
     }
   },
 

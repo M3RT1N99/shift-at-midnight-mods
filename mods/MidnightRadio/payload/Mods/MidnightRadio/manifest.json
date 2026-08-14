@@ -1,6 +1,6 @@
 {
   "name": "MidnightRadio",
-  "version_number": "1.2.1",
+  "version_number": "1.2.2",
   "website_url": "",
   "description": "Local custom music through the in-game boombox, with an F4 control panel and optional user-installed yt-dlp support.",
   "dependencies": []

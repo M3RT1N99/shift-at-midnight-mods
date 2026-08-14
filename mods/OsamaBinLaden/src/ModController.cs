@@ -69,7 +69,7 @@ namespace OsamaBinLaden
             {
                 _gateWarningShown = false;
                 _multiplayer?.Reset();
-                UpdateSolo(hunt: HuntManager.Instance, target);
+                UpdateSolo(HuntManager.Instance, target);
                 return;
             }
 

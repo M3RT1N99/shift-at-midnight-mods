@@ -52,6 +52,8 @@ std::wstring g_title;
 const wchar_t* Title() { return g_title.c_str(); }
 constexpr const wchar_t* kWindowTitleBase = L"Shift At Midnight - Mod Updater";
 constexpr const wchar_t* kGameExe = L"ShiftAtMidnight.exe";
+// Launching through Steam needs the app id; the exe path alone loses the Steam context.
+constexpr const wchar_t* kSteamAppId = L"3722330";
 constexpr const char* kOwner = "M3RT1N99";
 constexpr const char* kRepo = "shift-at-midnight-mods";
 
@@ -273,20 +275,42 @@ void RunAsync(std::function<void()> job) {
     }).detach();
 }
 
+/// <summary>
+/// Starts the game THROUGH STEAM, not by running the executable.
+///
+/// Launching ShiftAtMidnight.exe directly was copied from a 7 Days To Die updater, where
+/// bypassing the launcher is deliberate. Here it is wrong: without Steam's context
+/// SteamAPI_Init() fails, the game's PlatformManager throws in a loop, and it sits on the
+/// splash screen forever - which looked exactly like a mod hang and was chased as one.
+///
+/// MelonLoader is unaffected either way: the version.dll proxy is loaded by the process
+/// regardless of who started it.
+/// </summary>
 void LaunchGame() {
     if (g.gameDir.empty()) return;
-    const fs::path exe = g.gameDir / kGameExe;
 
-    SHELLEXECUTEINFOW info{};
-    info.cbSize = sizeof(info);
-    info.lpVerb = L"open";
-    info.lpFile = exe.c_str();
-    info.lpDirectory = g.gameDir.c_str();
-    info.nShow = SW_SHOWNORMAL;
-    info.fMask = SEE_MASK_NOASYNC;
+    auto shell = [](const std::wstring& file, const wchar_t* directory) {
+        SHELLEXECUTEINFOW info{};
+        info.cbSize = sizeof(info);
+        info.lpVerb = L"open";
+        info.lpFile = file.c_str();
+        info.lpDirectory = directory;
+        info.nShow = SW_SHOWNORMAL;
+        info.fMask = SEE_MASK_NOASYNC;
+        return ShellExecuteExW(&info) != FALSE;
+    };
 
-    if (ShellExecuteExW(&info)) Log(L"Spiel gestartet.");
-    else Log(L"Spiel konnte nicht gestartet werden.");
+    if (shell(std::wstring(L"steam://rungameid/") + kSteamAppId, nullptr)) {
+        Log(L"Spiel über Steam gestartet.");
+        return;
+    }
+
+    // Only if the protocol handler is missing - a Steam-less machine cannot run this game
+    // anyway, but failing loudly beats doing nothing.
+    Log(L"Steam nicht erreichbar, starte die Exe direkt - "
+        L"das Spiel kann dabei im Ladebildschirm stehenbleiben.");
+    if (!shell((g.gameDir / kGameExe).wstring(), g.gameDir.c_str()))
+        Log(L"Spiel konnte nicht gestartet werden.");
 }
 
 void DoUpdate(bool thenPlay) {

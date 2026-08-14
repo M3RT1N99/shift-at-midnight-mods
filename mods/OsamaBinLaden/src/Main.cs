@@ -1,6 +1,6 @@
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(OsamaBinLaden.OsamaBinLadenMod), "Osama Bin Laden NPC", "0.1.0", "Marti")]
+[assembly: MelonInfo(typeof(OsamaBinLaden.OsamaBinLadenMod), "Osama Bin Laden NPC", "0.2.0", "Marti")]
 [assembly: VerifyLoaderVersion(0, 7, 3, true)]
 
 namespace OsamaBinLaden

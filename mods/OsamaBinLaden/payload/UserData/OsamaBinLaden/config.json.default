@@ -1,7 +1,7 @@
 {
-  "version": 1,
+  "version": 2,
   "enabled": true,
-  "singlePlayerOnly": true,
+  "singlePlayerOnly": false,
 
   "spawn": {
     "enabled": true,
@@ -27,11 +27,18 @@
   },
 
   "safety": {
-    "disableInMultiplayer": true,
-    "allowNetworkSends": false
+    "disableInMultiplayer": false,
+    "allowNetworkSends": true
   },
 
   "logging": {
     "level": "info"
+  },
+
+  "multiplayer": {
+    "handshakeTimeoutSeconds": 8.0,
+    "heartbeatIntervalSeconds": 4.0,
+    "peerTimeoutSeconds": 15.0,
+    "hostMarkerRepublishSeconds": 5.0
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "OsamaBinLaden",
-  "version_number": "0.1.0",
+  "version_number": "0.2.0",
   "website_url": "",
-  "description": "Work-in-progress single-player-only charging monster NPC. Contains no character art, audio or game assets.",
+  "description": "Work-in-progress charging monster NPC. Works in single-player and, host-authoritatively, in multiplayer. Contains no character art, audio or game assets.",
   "dependencies": []
 }
