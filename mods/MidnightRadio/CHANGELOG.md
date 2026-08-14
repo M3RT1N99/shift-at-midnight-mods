@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1 - 2026-08-15
+
+- Fixed the splash-screen hang. ResolveRadio ran every two seconds from the first frame,
+  and its fallback enumerates every GameObject in the scene - the most expensive possible
+  scan, repeated while the scene was still loading and while no boombox could exist yet.
+  It now backs off to a 20-second ceiling and resets once a radio is adopted. Confirmed by
+  Unity's own log growing past the point it had stopped at on every hang.
+- Update() logs a heartbeat with uptime and frame count, loud for the first minute. A
+  stalled game can now be told apart from a stalled mod without guessing.
+- The manager shows its version in the window title, and deletes the settings file older
+  builds left beside it.
+
 ## 1.2.0 - 2026-08-14
 
 The mod, the manager and the release tag now share one version number. They had drifted

@@ -2,11 +2,12 @@ using System;
 using System.IO;
 using Il2Cpp;
 using MelonLoader.Utils;
+using OsamaBinLaden.Multiplayer;
 using UnityEngine;
 
 namespace OsamaBinLaden
 {
-    /// <summary>Owns the single-player Hunt state machine and every runtime object.</summary>
+    /// <summary>Owns the Hunt state machine and every runtime object, in solo and multiplayer.</summary>
     internal sealed class ModController : IDisposable
     {
         private readonly string _configPath;
@@ -17,6 +18,7 @@ namespace OsamaBinLaden
         private bool _huntObserved;
         private bool _spawnAttemptedThisHunt;
         private bool _gateWarningShown;
+        private EncounterSession _multiplayer;
         private bool _disposed;
 
         public ModController()
@@ -59,24 +61,36 @@ namespace OsamaBinLaden
             if (!_config.Enabled || !_config.Spawn.Enabled)
             {
                 ResetEncounter();
+                _multiplayer?.Reset();
                 return;
             }
 
-            if (!SessionGate.TryGetSoloPlayer(out PlayerManager player, out Transform target))
+            if (SessionGate.TryGetSoloPlayer(out PlayerManager player, out Transform target))
             {
-                CleanupCharacter();
-                _huntObserved = false;
-                _spawnAttemptedThisHunt = false;
-                if (!_gateWarningShown)
-                {
-                    Log.Warn("inactive: the game has not positively confirmed a live solo session");
-                    _gateWarningShown = true;
-                }
+                _gateWarningShown = false;
+                _multiplayer?.Reset();
+                UpdateSolo(hunt: HuntManager.Instance, target);
                 return;
             }
-            _gateWarningShown = false;
 
-            HuntManager hunt = HuntManager.Instance;
+            // Not a positively-confirmed solo session. Never keep a solo character alive on
+            // the strength of a stale target reference while we decide what to do next.
+            CleanupCharacter();
+            _huntObserved = false;
+            _spawnAttemptedThisHunt = false;
+
+            if (TryUpdateMultiplayer()) return;
+
+            _multiplayer?.Reset();
+            if (!_gateWarningShown)
+            {
+                Log.Warn("inactive: the game has not positively confirmed a live solo or multiplayer session");
+                _gateWarningShown = true;
+            }
+        }
+
+        private void UpdateSolo(HuntManager hunt, Transform target)
+        {
             if (hunt == null || !hunt || !hunt.isActiveAndEnabled)
             {
                 ResetEncounter();
@@ -102,6 +116,29 @@ namespace OsamaBinLaden
             _character.SetTarget(target);
             _character.Tick(Time.deltaTime);
             if (_character.IsFinished) CleanupCharacter();
+        }
+
+        /// <summary>
+        /// True once a live, positively-confirmed non-solo Fusion session was found and
+        /// handed to the multiplayer encounter session, regardless of whether it did anything
+        /// this tick. False tells the caller to fall back to the "inactive" warning, the same
+        /// way an ambiguous solo session does.
+        /// </summary>
+        private bool TryUpdateMultiplayer()
+        {
+            if (_config.SinglePlayerOnly || _config.Safety.DisableInMultiplayer ||
+                !_config.Safety.AllowNetworkSends)
+                return false;
+
+            _multiplayer ??= new EncounterSession(_config);
+            if (!_multiplayer.IsActive)
+            {
+                _multiplayer.Reset();
+                return false;
+            }
+
+            _multiplayer.Update(Time.deltaTime);
+            return true;
         }
 
         private void TryStartEncounter(HuntManager hunt, Transform target)
@@ -172,6 +209,7 @@ namespace OsamaBinLaden
         {
             if (_disposed) return;
             ResetEncounter();
+            _multiplayer?.Reset();
             _gateWarningShown = false;
         }
 
@@ -194,6 +232,8 @@ namespace OsamaBinLaden
             if (_disposed) return;
             _disposed = true;
             CleanupCharacter();
+            _multiplayer?.Dispose();
+            _multiplayer = null;
             _config.Save(_configPath);
         }
     }

@@ -42,6 +42,15 @@ namespace OsamaBinLaden
         }
     }
 
+    /// <summary>Why a character detonated. Purely informational for logging and, in a
+    /// multiplayer encounter, for the reason code echoed to peers; it never changes damage.</summary>
+    internal enum DetonationCause
+    {
+        ReachedTarget,
+        FuseExpired,
+        LifetimeExpired
+    }
+
     /// <summary>
     /// A deliberately local, non-networked character assembled from Unity primitives.
     /// The owning controller calls <see cref="Tick"/> from the Unity main thread and owns
@@ -51,16 +60,18 @@ namespace OsamaBinLaden
     {
         internal readonly struct DetonationInfo
         {
-            public DetonationInfo(Vector3 position, Transform target, float distanceToTarget)
+            public DetonationInfo(Vector3 position, Transform target, float distanceToTarget, DetonationCause cause)
             {
                 Position = position;
                 Target = target;
                 DistanceToTarget = distanceToTarget;
+                Cause = cause;
             }
 
             public Vector3 Position { get; }
             public Transform Target { get; }
             public float DistanceToTarget { get; }
+            public DetonationCause Cause { get; }
         }
 
         private const float TurnSpeedDegrees = 540f;
@@ -85,6 +96,7 @@ namespace OsamaBinLaden
         private bool _fuseStarted;
         private bool _detonated;
         private bool _disposed;
+        private DetonationCause _cause = DetonationCause.FuseExpired;
 
         public RuntimeCharacter(
             Transform target,
@@ -148,6 +160,7 @@ namespace OsamaBinLaden
             _lifetime += dt;
             if (_lifetime >= _options.MaximumLifetimeSeconds)
             {
+                _cause = DetonationCause.LifetimeExpired;
                 Detonate();
                 return;
             }
@@ -157,6 +170,7 @@ namespace OsamaBinLaden
                 _fuseElapsed += dt;
                 if (_fuseElapsed >= _options.FuseSeconds)
                 {
+                    _cause = DetonationCause.FuseExpired;
                     Detonate();
                     return;
                 }
@@ -185,6 +199,7 @@ namespace OsamaBinLaden
                 _fuseElapsed = 0f;
                 if (_options.FuseSeconds <= 0f)
                 {
+                    _cause = DetonationCause.ReachedTarget;
                     Detonate();
                     return;
                 }
@@ -245,7 +260,7 @@ namespace OsamaBinLaden
 
             // State is already committed before calling outside code. If damage handling
             // fails, this character cannot detonate a second time on the following frame.
-            _onDetonated?.Invoke(new DetonationInfo(position, target, distance));
+            _onDetonated?.Invoke(new DetonationInfo(position, target, distance, _cause));
         }
 
         public void Dispose()
