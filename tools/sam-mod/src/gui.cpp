@@ -34,6 +34,7 @@
 #include "install.hpp"
 #include "loader.hpp"
 #include "selfupdate.hpp"
+#include "steam.hpp"
 
 #pragma comment(lib, "comctl32.lib")
 
@@ -118,27 +119,6 @@ struct App {
 
 App g;
 
-// ---------------------------------------------------------------- config
-
-// Remembered next to the executable so a copied .exe carries its own settings.
-fs::path ConfigPath() {
-    wchar_t buffer[MAX_PATH]{};
-    GetModuleFileNameW(nullptr, buffer, MAX_PATH);
-    return fs::path(buffer).parent_path() / "sam-mod-gui.txt";
-}
-
-std::wstring LoadSavedPath() {
-    std::wifstream in(ConfigPath());
-    std::wstring line;
-    if (in && std::getline(in, line)) return line;
-    return {};
-}
-
-void SaveePath(const std::wstring& value) {
-    std::wofstream out(ConfigPath(), std::ios::trunc);
-    if (out) out << value << L"\n";
-}
-
 // ---------------------------------------------------------------- helpers
 
 void Log(const std::wstring& line) {
@@ -176,18 +156,7 @@ bool IsGameRunning() {
 }
 
 fs::path DetectGameDir() {
-    for (const wchar_t* root : {L"C:", L"D:", L"E:", L"F:"}) {
-        for (const wchar_t* tail : {
-                 L"Program Files (x86)/Steam/steamapps/common/Shift At Midnight",
-                 L"Steam/steamapps/common/Shift At Midnight",
-                 L"Games/Steam Games/steamapps/common/Shift At Midnight",
-                 L"SteamLibrary/steamapps/common/Shift At Midnight"}) {
-            fs::path candidate = fs::path(std::wstring(root) + L"\\") / tail;
-            std::error_code ignored;
-            if (fs::exists(candidate / kGameExe, ignored)) return candidate;
-        }
-    }
-    return {};
+    return SteamLocator::findGame(L"Shift At Midnight", kGameExe);
 }
 
 // ---------------------------------------------------------------- state display
@@ -594,7 +563,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
                     wchar_t buffer[MAX_PATH]{};
                     const bool ok = SHGetPathFromIDListW(picked, buffer);
                     CoTaskMemFree(picked);
-                    if (ok) { SetWindowTextW(g.pathBox, buffer); SaveePath(buffer); }
+                    if (ok) SetWindowTextW(g.pathBox, buffer);
                     return 0;
                 }
 
@@ -625,7 +594,6 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
                         }
                     }
 
-                    SaveePath(PathBoxText());
                     DoUpdate(id == IdUpdatePlay);
                     return 0;
                 }
@@ -784,9 +752,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     ShowWindow(window, show);
     UpdateWindow(window);
 
-    // A remembered folder wins over detection: the user chose it deliberately.
-    std::wstring startPath = LoadSavedPath();
-    if (!IsValidGameDir(startPath)) startPath = DetectGameDir().wstring();
+    // Detected every time from Steam's own registry entry and library list. There is no
+    // settings file: remembering a hand-typed path was only ever a workaround for guessing
+    // badly, and the machine already knows the answer.
+    std::wstring startPath = DetectGameDir().wstring();
     SetWindowTextW(g.pathBox, startPath.c_str());
     RefreshValidity();
 

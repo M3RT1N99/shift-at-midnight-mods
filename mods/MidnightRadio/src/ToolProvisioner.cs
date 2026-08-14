@@ -257,13 +257,29 @@ namespace MidnightRadio
                 using var process = System.Diagnostics.Process.Start(start);
                 if (process == null) return null;
 
+                // BOTH pipes must be drained. Redirecting stderr and never reading it lets
+                // the child block once the 4 KB pipe buffer fills, and then WaitForExit
+                // never returns - yt-dlp does write to stderr, the JavaScript-runtime
+                // warning being the obvious case.
                 Task<string> output = process.StandardOutput.ReadToEndAsync();
+                Task<string> errors = process.StandardError.ReadToEndAsync();
 
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(20));
-                await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
 
-                return (await output.ConfigureAwait(false) ?? string.Empty).Trim();
+                try
+                {
+                    await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+                    Log.Debug("yt-dlp --version timed out");
+                    return null;
+                }
+
+                await Task.WhenAll(output, errors).ConfigureAwait(false);
+                return (output.Result ?? string.Empty).Trim();
             }
             catch (Exception ex)
             {

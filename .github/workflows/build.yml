@@ -97,26 +97,21 @@ jobs:
         shell: pwsh
         run: .\tools\sam-mod\build.ps1 -Configuration Release
 
-      - name: Check the binaries run
+      - name: Check the binary runs
         shell: pwsh
         run: |
-          $cli = '.\tools\sam-mod\build\sam-mod.exe'
-          & $cli --help | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw 'sam-mod.exe did not run.' }
-
-          # The GUI is windowed, so it is started and closed rather than asked for help.
+          # Windowed, so it is started and closed rather than asked for --help. There is no
+          # console front end left to interrogate.
           $gui = Start-Process '.\tools\sam-mod\build\sam-mod-gui.exe' -PassThru
           Start-Sleep -Seconds 5
           if ($gui.HasExited) { throw "sam-mod-gui.exe exited immediately (code $($gui.ExitCode))." }
           Stop-Process -Id $gui.Id -Force
-          Write-Host 'both binaries start'
+          Write-Host 'the binary starts'
 
       - uses: actions/upload-artifact@v4
         with:
           name: sam-mod
-          path: |
-            tools/sam-mod/build/sam-mod.exe
-            tools/sam-mod/build/sam-mod-gui.exe
+          path: tools/sam-mod/build/sam-mod-gui.exe
           if-no-files-found: error
           retention-days: 30
 
@@ -141,5 +136,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
-            dist/sam-mod.exe dist/sam-mod-gui.exe \
+            dist/sam-mod-gui.exe \
             --clobber --repo "${GITHUB_REPOSITORY}"

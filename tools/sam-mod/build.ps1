@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Build sam-mod.exe.
+    Build sam-mod-gui.exe.
 
 .DESCRIPTION
     Compiles the installer with whichever toolchain is present: clang++ first, then MSVC.
@@ -25,23 +25,16 @@ $root = $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $root 'build' }
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 
-# Two front ends over the same headers: a console tool and a double-clickable window.
-# The GUI is what an end user gets handed, so it is not optional.
+# One target: the double-clickable window. A console front end existed alongside it and
+# was dropped - it duplicated every feature for an audience of one.
 $targets = @(
-    @{
-        Name    = 'sam-mod.exe'
-        Source  = Join-Path $root 'src/main.cpp'
-        Libs    = @('-lbcrypt', '-lwinhttp')
-        MsvcLibs = @('bcrypt.lib', 'winhttp.lib')
-        Console = $true
-    }
     @{
         Name    = 'sam-mod-gui.exe'
         Source  = Join-Path $root 'src/gui.cpp'
         Libs    = @('-luser32', '-lgdi32', '-lcomctl32', '-lole32', '-lshell32',
-                    '-lcomdlg32', '-lbcrypt', '-lwinhttp')
+                    '-lcomdlg32', '-lbcrypt', '-lwinhttp', '-ladvapi32')
         MsvcLibs = @('user32.lib', 'gdi32.lib', 'comctl32.lib', 'ole32.lib',
-                     'shell32.lib', 'comdlg32.lib', 'bcrypt.lib', 'winhttp.lib')
+                     'shell32.lib', 'comdlg32.lib', 'bcrypt.lib', 'winhttp.lib', 'advapi32.lib')
         Console = $false
     }
 )
@@ -113,9 +106,11 @@ foreach ($t in $targets) {
     Write-Host "    $($built.Name)  $([math]::Round($built.Length / 1KB, 1)) KB" -ForegroundColor Green
 }
 
-# A console build that cannot answer --help is not worth shipping. The GUI has no such
-# check here: starting a window from a build script would need one closed again by hand.
-$cli = Join-Path $OutDir 'sam-mod.exe'
-& $cli --help | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'The built executable did not run.' }
+# The window is started and closed rather than asked for --help, since there is no console
+# front end left to interrogate.
+$gui = Join-Path $OutDir 'sam-mod-gui.exe'
+$process = Start-Process -FilePath $gui -PassThru
+Start-Sleep -Seconds 3
+if ($process.HasExited) { throw "sam-mod-gui.exe exited immediately (code $($process.ExitCode))." }
+Stop-Process -Id $process.Id -Force
 Write-Host '    smoke check passed' -ForegroundColor Green

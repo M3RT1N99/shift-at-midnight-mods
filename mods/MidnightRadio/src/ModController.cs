@@ -31,6 +31,10 @@ namespace MidnightRadio
         private RadioTarget _radio;
         private float _nextResolve;
         private float _nextReceiveHookAttempt;
+        private bool _toolUpdateStarted;
+
+        /// <summary>Long enough that the check can never land during loading.</summary>
+        private const float ToolUpdateDelaySeconds = 45f;
         private int _currentIndex = -1;
         private bool _reloadRunning;
         private bool _reloadPending;
@@ -98,16 +102,11 @@ namespace MidnightRadio
 
             ReloadLibrary();
 
-            // Deliberately fire-and-forget on a worker thread. Keeping the tools current
-            // matters - yt-dlp stops working within weeks as sites change - but it is never
-            // worth delaying the game for, and being offline is not an error.
-            // Called directly rather than through Task.Run: UpdateAsync is already async
-            // throughout, and Task.Run's Func<Task> overload carries nullable annotations
-            // that the Il2Cpp interop mscorlib cannot satisfy (CS0656 NullableAttribute).
-            _ = _provisioner.UpdateAsync(
-                _config.Tools,
-                new Progress<string>(message => Post(() => _ui.SetStatus(message))),
-                _shutdown.Token);
+            // The tool-update check is NOT started here. "Fire and forget" was neither: an
+            // async method runs
+            // synchronously up to its first await, and this one starts yt-dlp.exe - about a
+            // second on its own - before ever yielding, right on the thread that is loading
+            // the game. It is deferred to Update() and runs on its own thread.
         }
 
         public void Update()
@@ -123,6 +122,7 @@ namespace MidnightRadio
             }
 
             TryInstallReceiveHook(now);
+            TryStartToolUpdate(now);
 
             _player.Tick();
             _session.Tick(_radio != null && _radio.IsValid ? _radio.Playback : null);
@@ -165,6 +165,38 @@ namespace MidnightRadio
             if (!Sync.RunnerBridge.IsRunning) return;
 
             Sync.ReceiveHook.Apply(_transport);
+        }
+
+        /// <summary>
+        /// Starts the tool-update check once, well after the game has finished loading, and
+        /// on its own thread.
+        ///
+        /// This used to run from the constructor. That hung the game on the splash screen:
+        /// an async method executes synchronously until its first await, and this one
+        /// launches yt-dlp.exe - roughly a second by itself - before yielding, on the thread
+        /// loading the game. Worse, the version probe redirected stderr without draining it,
+        /// so a chatty yt-dlp could fill the pipe buffer and block forever.
+        ///
+        /// A plain thread rather than Task.Run: its Func&lt;Task&gt; overload carries nullable
+        /// annotations the Il2Cpp interop mscorlib cannot satisfy (CS0656).
+        /// </summary>
+        private void TryStartToolUpdate(float now)
+        {
+            if (_toolUpdateStarted) return;
+            if (now < ToolUpdateDelaySeconds) return;
+
+            _toolUpdateStarted = true;
+
+            var worker = new Thread(() => Log.Guard("tool update", () =>
+                _provisioner.UpdateAsync(
+                    _config.Tools,
+                    new Progress<string>(message => Post(() => _ui.SetStatus(message))),
+                    _shutdown.Token).GetAwaiter().GetResult()))
+            {
+                IsBackground = true,   // never keeps the game alive on quit
+                Name = "MidnightRadio tool update",
+            };
+            worker.Start();
         }
 
         private void ResolveRadio()
