@@ -59,6 +59,42 @@ enum : UINT {
     WmPlay = WM_APP + 4,     // worker asks the UI thread to launch the game
 };
 
+// ---------------------------------------------------------------- theme
+//
+// Dark, flat, and drawn by hand. Win32's stock controls are grey boxes; owner-drawing the
+// buttons and colouring the rest costs one WM_DRAWITEM handler and a few brushes, and
+// avoids pulling in a UI framework that would dwarf the binary it decorates.
+namespace theme {
+
+constexpr COLORREF Background   = RGB(0x1B, 0x1D, 0x22);
+constexpr COLORREF Surface      = RGB(0x24, 0x27, 0x2E);
+constexpr COLORREF SurfaceEdge  = RGB(0x33, 0x37, 0x40);
+constexpr COLORREF Text         = RGB(0xE6, 0xE8, 0xEC);
+constexpr COLORREF TextDim      = RGB(0x9A, 0xA0, 0xAC);
+constexpr COLORREF Accent       = RGB(0xC4, 0x3B, 0x3B);   // the game's red
+constexpr COLORREF AccentHover  = RGB(0xD9, 0x4B, 0x4B);
+constexpr COLORREF ButtonFace   = RGB(0x2E, 0x32, 0x3A);
+constexpr COLORREF ButtonHover  = RGB(0x3A, 0x3F, 0x49);
+constexpr COLORREF ButtonDown   = RGB(0x22, 0x25, 0x2B);
+constexpr COLORREF Disabled     = RGB(0x55, 0x5A, 0x63);
+constexpr COLORREF Good         = RGB(0x5A, 0xB0, 0x6E);
+constexpr COLORREF Bad          = RGB(0xD9, 0x5C, 0x5C);
+
+HBRUSH backgroundBrush = nullptr;
+HBRUSH surfaceBrush = nullptr;
+
+void create() {
+    backgroundBrush = CreateSolidBrush(Background);
+    surfaceBrush = CreateSolidBrush(Surface);
+}
+
+void destroy() {
+    if (backgroundBrush) DeleteObject(backgroundBrush);
+    if (surfaceBrush) DeleteObject(surfaceBrush);
+}
+
+}  // namespace theme
+
 std::wstring widen(const std::string& s) {
     if (s.empty()) return {};
     const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
@@ -334,13 +370,92 @@ void DoUpdate(bool thenPlay) {
 
 // ---------------------------------------------------------------- window
 
+/// Buttons currently under the cursor, so WM_DRAWITEM can light them.
+std::vector<HWND> g_hovered;
+
+bool IsHovered(HWND button) {
+    for (HWND h : g_hovered) if (h == button) return true;
+    return false;
+}
+
+/// <summary>
+/// Owner-drawn buttons get no hot state from Windows, so each one is subclassed to notice
+/// the cursor entering and leaving and repaint itself.
+/// </summary>
+LRESULT CALLBACK ButtonProc(HWND button, UINT message, WPARAM wParam, LPARAM lParam,
+                            UINT_PTR, DWORD_PTR) {
+    switch (message) {
+        case WM_MOUSEMOVE:
+            if (!IsHovered(button)) {
+                g_hovered.push_back(button);
+                TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, button, 0};
+                TrackMouseEvent(&track);
+                InvalidateRect(button, nullptr, TRUE);
+            }
+            break;
+
+        case WM_MOUSELEAVE:
+            for (std::size_t i = 0; i < g_hovered.size(); ++i) {
+                if (g_hovered[i] != button) continue;
+                g_hovered.erase(g_hovered.begin() + (std::ptrdiff_t)i);
+                break;
+            }
+            InvalidateRect(button, nullptr, TRUE);
+            break;
+    }
+    return DefSubclassProc(button, message, wParam, lParam);
+}
+
 HWND Make(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style,
           int x, int y, int w, int h, int id, HFONT font) {
+    // Buttons are drawn by hand; everything else keeps its stock behaviour and is merely
+    // recoloured through WM_CTLCOLOR*.
+    const bool isButton = std::wstring(cls) == L"BUTTON";
+    if (isButton) style |= BS_OWNERDRAW;
+
     HWND control = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style,
                                    x, y, w, h, parent, (HMENU)(INT_PTR)id,
                                    GetModuleHandleW(nullptr), nullptr);
     SendMessageW(control, WM_SETFONT, (WPARAM)font, TRUE);
+
+    if (isButton) SetWindowSubclass(control, ButtonProc, 1, 0);
     return control;
+}
+
+/// Flat rectangle plus centred label - the whole button look.
+void DrawButton(const DRAWITEMSTRUCT* item) {
+    const bool primary  = item->CtlID == IdUpdatePlay;
+    const bool disabled = (item->itemState & ODS_DISABLED) != 0;
+    const bool pressed  = (item->itemState & ODS_SELECTED) != 0;
+    const bool hot      = IsHovered(item->hwndItem);
+
+    COLORREF face;
+    if (disabled)     face = theme::ButtonFace;
+    else if (pressed) face = primary ? theme::Accent : theme::ButtonDown;
+    else if (hot)     face = primary ? theme::AccentHover : theme::ButtonHover;
+    else              face = primary ? theme::Accent : theme::ButtonFace;
+
+    HBRUSH brush = CreateSolidBrush(face);
+    FillRect(item->hDC, &item->rcItem, brush);
+    DeleteObject(brush);
+
+    // A one-pixel edge keeps the flat buttons from dissolving into the background.
+    if (!primary) {
+        HBRUSH edge = CreateSolidBrush(theme::SurfaceEdge);
+        FrameRect(item->hDC, &item->rcItem, edge);
+        DeleteObject(edge);
+    }
+
+    wchar_t caption[128]{};
+    GetWindowTextW(item->hwndItem, caption, 127);
+
+    SetBkMode(item->hDC, TRANSPARENT);
+    SetTextColor(item->hDC, disabled ? theme::Disabled : theme::Text);
+
+    RECT label = item->rcItem;
+    if (pressed) OffsetRect(&label, 0, 1);   // a slight give on click
+    DrawTextW(item->hDC, caption, -1, &label,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 }
 
 void BuildUi(HWND parent) {
@@ -403,21 +518,36 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
             BuildUi(window);
             return 0;
 
-        // Green when the folder is valid, red when it is not - the same at-a-glance cue
-        // the 7DTD updater uses.
-        case WM_CTLCOLORSTATIC:
-            if ((HWND)lParam == g.status) {
-                const bool ok = IsValidGameDir(PathBoxText());
-                SetTextColor((HDC)wParam, ok ? RGB(0x2E, 0x7D, 0x32) : RGB(0xC6, 0x28, 0x28));
-                SetBkMode((HDC)wParam, TRANSPARENT);
-                return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
-            }
-            if ((HWND)lParam == g.versions) {
-                SetTextColor((HDC)wParam, RGB(0x60, 0x60, 0x60));
-                SetBkMode((HDC)wParam, TRANSPARENT);
-                return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
-            }
+        case WM_DRAWITEM: {
+            const auto* item = (const DRAWITEMSTRUCT*)lParam;
+            if (item->CtlType == ODT_BUTTON) { DrawButton(item); return TRUE; }
             return DefWindowProcW(window, message, wParam, lParam);
+        }
+
+        // Labels sit directly on the window background; the green/red folder cue is the
+        // same at-a-glance signal the 7DTD updater uses, just tuned for a dark surface.
+        case WM_CTLCOLORSTATIC: {
+            HDC dc = (HDC)wParam;
+            SetBkMode(dc, TRANSPARENT);
+
+            if ((HWND)lParam == g.status)
+                SetTextColor(dc, IsValidGameDir(PathBoxText()) ? theme::Good : theme::Bad);
+            else if ((HWND)lParam == g.versions)
+                SetTextColor(dc, theme::TextDim);
+            else
+                SetTextColor(dc, theme::Text);
+
+            return (LRESULT)theme::backgroundBrush;
+        }
+
+        // Input surfaces are a shade lighter than the window so they read as fields.
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX: {
+            HDC dc = (HDC)wParam;
+            SetTextColor(dc, theme::Text);
+            SetBkColor(dc, theme::Surface);
+            return (LRESULT)theme::surfaceBrush;
+        }
 
         case WmLog: {
             std::unique_ptr<std::wstring> line((std::wstring*)lParam);
@@ -602,6 +732,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
 
         case WM_DESTROY:
             for (HFONT f : {g.font, g.bigFont, g.monoFont}) if (f) DeleteObject(f);
+            theme::destroy();
             PostQuitMessage(0);
             return 0;
     }
@@ -613,6 +744,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES};
     InitCommonControlsEx(&controls);
+    theme::create();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     WNDCLASSEXW cls{};
@@ -620,7 +752,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     cls.lpfnWndProc = WndProc;
     cls.hInstance = instance;
     cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    cls.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    cls.hbrBackground = theme::backgroundBrush;
     cls.lpszClassName = kWindowClass;
     RegisterClassExW(&cls);
 

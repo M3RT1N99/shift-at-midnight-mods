@@ -14,6 +14,7 @@
 #include "github.hpp"
 #include "install.hpp"
 #include "loader.hpp"
+#include "version.hpp"
 #include "json.hpp"
 #include "zip.hpp"
 
@@ -22,7 +23,6 @@ using namespace sam;
 
 namespace {
 
-constexpr const char* kVersion = "1.0.0";
 constexpr const char* kDefaultOwner = "M3RT1N99";
 constexpr const char* kDefaultRepo = "shift-at-midnight-mods";
 
@@ -37,7 +37,7 @@ struct Options {
 
 void printUsage() {
     std::cout <<
-        "sam-mod " << kVersion << " - mod installer for Shift At Midnight\n\n"
+        "sam-mod " << kManagerVersion << " - mod installer for Shift At Midnight\n\n"
         "USAGE\n"
         "  sam-mod <command> [options]\n\n"
         "COMMANDS\n"
@@ -84,27 +84,6 @@ bool confirm(const std::string& question, bool assumeYes) {
     std::string answer;
     std::getline(std::cin, answer);
     return answer == "y" || answer == "Y" || answer == "j" || answer == "J";
-}
-
-// Numeric-aware compare so 1.10.0 sorts above 1.9.0.
-int compareVersions(const std::string& a, const std::string& b) {
-    auto split = [](const std::string& v) {
-        std::vector<int> parts;
-        std::string current;
-        for (char c : v + ".") {
-            if (c == '.') { parts.push_back(current.empty() ? 0 : std::atoi(current.c_str()));
-                            current.clear(); }
-            else if (std::isdigit(static_cast<unsigned char>(c))) current.push_back(c);
-        }
-        return parts;
-    };
-    const auto left = split(a), right = split(b);
-    for (std::size_t i = 0; i < (std::max)(left.size(), right.size()); ++i) {
-        const int l = i < left.size() ? left[i] : 0;
-        const int r = i < right.size() ? right[i] : 0;
-        if (l != r) return l < r ? -1 : 1;
-    }
-    return 0;
 }
 
 int cmdList(Installer& installer) {
