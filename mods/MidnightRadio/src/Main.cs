@@ -1,7 +1,12 @@
 using System;
 using MelonLoader;
 
-[assembly: MelonInfo(typeof(MidnightRadio.MidnightRadioMod), "Midnight Radio", "1.0.0", "Marti")]
+// MelonLoader reads the version from THIS attribute and nowhere else - not from the
+// csproj, not from the manifest. It sat at 1.0.0 while everything else said 1.1.0, so the
+// loader log and the mod manager disagreed. build.ps1 now fails if this drifts from
+// mod.json again.
+[assembly: MelonInfo(typeof(MidnightRadio.MidnightRadioMod), "Midnight Radio",
+    MidnightRadio.BuildVersion.Value, "Marti")]
 [assembly: VerifyLoaderVersion(0, 7, 3, true)]
 
 namespace MidnightRadio

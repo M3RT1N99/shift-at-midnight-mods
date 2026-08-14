@@ -184,6 +184,23 @@ Launch the game once with MelonLoader installed and wait for
 }
 Write-Ok 'Il2Cpp interop assemblies present'
 
+# MelonLoader reads the version from the MelonInfo attribute and nowhere else, so it can
+# sit at an old number while the manifest, the package and the mod manager all agree on a
+# newer one - which is exactly what shipped in 1.1.0. Fail the build instead.
+$manifestVersion = (Get-Content -LiteralPath (Join-Path $ModRoot 'mod.json') -Raw |
+                    ConvertFrom-Json).version
+$buildVersionFile = Join-Path $ModRoot 'src/BuildVersion.cs'
+$declared = [regex]::Match(
+    (Get-Content -LiteralPath $buildVersionFile -Raw),
+    'Value\s*=\s*"([^"]+)"').Groups[1].Value
+
+if ($declared -ne $manifestVersion) {
+    throw "Version mismatch: mod.json says '$manifestVersion' but src/BuildVersion.cs says " +
+          "'$declared'. MelonLoader reports the latter, so they must match."
+}
+Write-Ok "version $manifestVersion consistent"
+
+
 # ----------------------------------------------------------------- build
 if ($Clean -and (Test-Path -LiteralPath $OutDir)) {
     Write-Step 'Cleaning'

@@ -36,9 +36,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 6.0 as well as 8.0: the plugins target net6.0, and tests/NuGet.Config clears every
+      # package source so the smoke build also works offline. With no source to restore
+      # from, the reference packs have to come from a locally installed SDK - otherwise
+      # restore fails with NU1101 for Microsoft.NETCore.App.Ref.
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: |
+            6.0.x
+            8.0.x
 
       - name: Discover mods
         id: mods

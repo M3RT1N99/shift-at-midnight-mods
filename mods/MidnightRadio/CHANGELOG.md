@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.1 - 2026-08-13
+
+- Downloaded tracks are named after the video title instead of its id. The playlist
+  showed entries like "Youtube-5zvn60-E1HA", which told the player nothing.
+  `--restrict-filenames` is dropped with it: it strips non-ASCII and turns spaces into
+  underscores, mangling exactly the titles this is meant to surface.
+- Deno is provisioned alongside yt-dlp and ffmpeg. yt-dlp warns that YouTube extraction
+  without a JavaScript runtime is deprecated and drops formats; that is a warning now and
+  a breakage later. Treated as a degradation, not a requirement - if it cannot be
+  fetched, downloads still work with fewer formats.
+
 ## 1.1.0 - 2026-08-13
 
 First build with working playback. Verified in-game against build 24450017 with
