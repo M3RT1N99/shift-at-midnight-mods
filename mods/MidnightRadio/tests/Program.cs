@@ -375,7 +375,9 @@ namespace MidnightRadio.SmokeTests
                 }");
 
                 var config = Config.Load(path);
-                Equal(3, config.Version, "preserved version");
+                // Version 3 is now migrated forward rather than preserved; this case is
+                // about the null sections below being filled in, not about the number.
+                Equal(Config.CurrentVersion, config.Version, "version brought current");
                 Equal("F7", config.Hotkey, "preserved hotkey");
                 NotNull(config.MusicDirs, "music directories");
                 NotNull(config.Playback, "playback section");

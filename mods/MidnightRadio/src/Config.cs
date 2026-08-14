@@ -13,7 +13,7 @@ namespace MidnightRadio
     internal sealed class Config
     {
         /// <summary>Bump when a stored config needs repairing; see <see cref="Migrate"/>.</summary>
-        public const int CurrentVersion = 3;
+        public const int CurrentVersion = 4;
 
         public int Version { get; set; } = CurrentVersion;
 
@@ -46,21 +46,21 @@ namespace MidnightRadio
         internal sealed class SyncCfg
         {
             // Synchronised playback is the point of the mod: everyone hears the same track
-            // and anyone may queue. These stay ON.
+            // and anyone may queue.
             //
-            // Safety does not come from switching them off - it comes from the runtime
-            // gate in SyncTransport.CanSend(), which verifies the session actually permits
-            // reliable data and falls back to local-only playback if not. Turning the
-            // defaults off would disable the feature for everyone rather than only where
-            // it cannot work.
-            // OFF for the 1.1.0 release only, and this is not a reversal of the design:
-            // the transport, clock, session and open-queue authority are all implemented and
-            // the defaults below still describe the intended behaviour. What is missing is
-            // one live confirmation. Applying the Fusion receive hook during mod init stopped
-            // the game reaching a scene; it is now deferred until a session exists, but that
-            // path has never run in real co-op. Shipping it on would risk hanging a
-            // stranger's session at join time. Flip this back once it is verified.
-            public bool Enabled { get; set; }
+            // Safety comes from the runtime gate in SyncTransport.CanSend(), which verifies
+            // the session actually permits reliable data and falls back to local playback
+            // if not - not from shipping the switch off.
+            //
+            // It did ship off for one release while the receive hook was unproven, but that made
+            // the feature unreachable in practice: both players install the same package,
+            // so both got it disabled, and "everyone hears the same music" never happened
+            // for anyone who did not hand-edit a file.
+            //
+            // The risk it was guarding against is now much smaller - the hook is applied
+            // only once a session is actually running, never during load - and the failure
+            // mode is recoverable: set this to false and playback returns to local.
+            public bool Enabled { get; set; } = true;
             public int  ProtocolVersion { get; set; } = 1;
 
             public bool AcceptFromOthers { get; set; } = true;
@@ -224,6 +224,19 @@ namespace MidnightRadio
 
                 Log.Info($"config migrated from version {from} to {CurrentVersion}: "
                          + "synced playback re-enabled");
+            }
+
+            if (from < 4)
+            {
+                // Version 3 shipped with sync off while the receive hook was unproven. Both
+                // players install the same package, so both ended up disabled and the
+                // feature was unreachable without editing a file by hand.
+                Sync.Enabled = true;
+                Sync.AcceptFromOthers = true;
+                Sync.AnyoneCanQueue = true;
+                Sync.AnyoneCanSkip = true;
+
+                Log.Info("config migrated to version 4: synced playback enabled by default");
             }
         }
 

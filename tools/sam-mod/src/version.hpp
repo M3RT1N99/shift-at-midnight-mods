@@ -6,7 +6,7 @@
 
 namespace sam {
 
-constexpr const char* kManagerVersion = "1.2.2";
+constexpr const char* kManagerVersion = "1.2.3";
 
 /// <summary>
 /// Numeric-aware comparison, so 1.10.0 sorts above 1.9.0 where a string compare would not.

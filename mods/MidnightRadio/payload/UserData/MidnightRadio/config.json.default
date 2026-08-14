@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "hotkey": "F4",
   "language": "auto",
   "musicDirs": [],
@@ -13,11 +13,11 @@
     "maxTrackMinutes": 10
   },
   "sync": {
-    "enabled": false,
+    "enabled": true,
     "protocolVersion": 1,
-    "acceptFromOthers": false,
-    "anyoneCanQueue": false,
-    "anyoneCanSkip": false,
+    "acceptFromOthers": true,
+    "anyoneCanQueue": true,
+    "anyoneCanSkip": true,
     "requireVoteToSkip": false,
     "startLeadMs": 1500,
     "prefetchLeadSeconds": 20,

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.3 - 2026-08-15
+
+- Synchronised playback is on by default again, and existing configs are migrated to it.
+  It shipped off in 1.2.0 while the Fusion receive hook was unproven, but both players
+  install the same package - so both got it disabled, and "everyone hears the same music"
+  could not happen for anyone who did not hand-edit a file. The hook is now applied only
+  once a session is running, never during load, and setting `sync.enabled` back to false
+  returns playback to local.
+
+  Both players still need the mod, and each needs the track itself: only an identifier
+  crosses the wire, never audio.
+
 ## 1.2.2 - 2026-08-15
 
 - The manager starts the game through Steam instead of running the executable directly.
